@@ -1,0 +1,499 @@
+@page "/admin"
+@rendermode InteractiveServer
+@using TodoApp.Web.Services
+@using TodoApp.Web.Models
+@using System.Net.Http.Json
+@inject AuthService Auth
+@inject NavigationManager Nav
+@inject IHttpClientFactory HttpFactory
+
+<PageTitle>Admin — TodoApp</PageTitle>
+
+@if (!Auth.IsAdmin)
+{
+    <div class="admin-forbidden">
+        <span>🔒</span>
+        <h2>Access Denied</h2>
+        <p>This area is restricted to administrators.</p>
+        <a href="/">← Back to my todos</a>
+    </div>
+    return;
+}
+
+<div class="admin-container">
+    <div class="admin-header">
+        <div>
+            <h1>🛡️ Admin Panel</h1>
+            <p class="admin-sub">Manage tenants and users across the platform</p>
+        </div>
+    </div>
+
+    <!-- Tab bar -->
+    <div class="admin-tabs">
+        <button class="admin-tab @(tab == "tenants" ? "active" : "")" @onclick='() => SwitchTab("tenants")'>
+            🏢 Tenants <span class="tab-count">@tenants.Count</span>
+        </button>
+        <button class="admin-tab @(tab == "users" ? "active" : "")" @onclick='() => SwitchTab("users")'>
+            👥 Users <span class="tab-count">@users.Count</span>
+        </button>
+    </div>
+
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="admin-alert @(isError ? "alert-error" : "alert-success")">
+            @message
+            <button @onclick="() => message = null">✕</button>
+        </div>
+    }
+
+    <!-- ── TENANTS TAB ──────────────────────────────────────────────── -->
+    @if (tab == "tenants")
+    {
+        <div class="admin-toolbar">
+            <button class="btn-primary" @onclick="() => showTenantForm = !showTenantForm">
+                @(showTenantForm ? "✕ Cancel" : "+ New Tenant")
+            </button>
+        </div>
+
+        @if (showTenantForm)
+        {
+            <div class="admin-form-card">
+                <h3>Create Tenant</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Name</label>
+                        <input class="form-input" @bind="newTenant.Name" placeholder="Acme Corp" />
+                    </div>
+                    <div class="form-group">
+                        <label>Slug <span class="hint">(URL-safe, e.g. acme-corp)</span></label>
+                        <input class="form-input" @bind="newTenant.Slug" placeholder="acme-corp" />
+                    </div>
+                </div>
+                <button class="btn-primary" @onclick="CreateTenantAsync" disabled="@isBusy">
+                    @(isBusy ? "Creating…" : "Create Tenant")
+                </button>
+            </div>
+        }
+
+        @if (isLoading)
+        {
+            <div class="loading-state"><div class="spinner"></div> Loading tenants…</div>
+        }
+        else if (tenants.Count == 0)
+        {
+            <div class="admin-empty">No tenants yet. Create one above.</div>
+        }
+        else
+        {
+            <div class="admin-table-wrap">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Slug</th>
+                            <th>Users</th>
+                            <th>Status</th>
+                            <th>Created</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var t in tenants)
+                        {
+                            <tr>
+                                <td>
+                                    @if (editingTenantId == t.Id)
+                                    {
+                                        <input class="table-input" @bind="editTenantName" />
+                                    }
+                                    else
+                                    {
+                                        <strong>@t.Name</strong>
+                                    }
+                                </td>
+                                <td><code class="slug-badge">@t.Slug</code></td>
+                                <td>
+                                    <button class="link-btn" @onclick="() => FilterUsersByTenant(t.Id, t.Name)">
+                                        @t.UserCount user@(t.UserCount == 1 ? "" : "s")
+                                    </button>
+                                </td>
+                                <td>
+                                    <span class="status-badge @(t.IsActive ? "active" : "inactive")">
+                                        @(t.IsActive ? "Active" : "Inactive")
+                                    </span>
+                                </td>
+                                <td class="muted">@t.CreatedAt.ToLocalTime().ToString("d MMM yyyy")</td>
+                                <td>
+                                    <div class="action-group">
+                                        @if (editingTenantId == t.Id)
+                                        {
+                                            <button class="btn-sm btn-success" @onclick="() => SaveTenantAsync(t.Id)">Save</button>
+                                            <button class="btn-sm" @onclick="() => editingTenantId = null">Cancel</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn-sm" @onclick="() => StartEditTenant(t)">Edit</button>
+                                            <button class="btn-sm @(t.IsActive ? "btn-warn" : "btn-success")"
+                                                    @onclick="() => ToggleTenantAsync(t)">
+                                                @(t.IsActive ? "Deactivate" : "Activate")
+                                            </button>
+                                            @if (t.UserCount == 0)
+                                            {
+                                                <button class="btn-sm btn-danger" @onclick="() => DeleteTenantAsync(t.Id)">Delete</button>
+                                            }
+                                        }
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+
+    <!-- ── USERS TAB ────────────────────────────────────────────────── -->
+    @if (tab == "users")
+    {
+        <div class="admin-toolbar">
+            <div class="toolbar-left">
+                @if (tenantFilter != null)
+                {
+                    <span class="filter-chip">
+                        🏢 @tenantFilterName
+                        <button @onclick="ClearTenantFilter">✕</button>
+                    </span>
+                }
+            </div>
+            <button class="btn-primary" @onclick="() => showUserForm = !showUserForm">
+                @(showUserForm ? "✕ Cancel" : "+ New User")
+            </button>
+        </div>
+
+        @if (showUserForm)
+        {
+            <div class="admin-form-card">
+                <h3>Create User</h3>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Email</label>
+                        <input class="form-input" type="email" @bind="newUser.Email" placeholder="user@example.com" />
+                    </div>
+                    <div class="form-group">
+                        <label>Display Name <span class="hint">(optional)</span></label>
+                        <input class="form-input" @bind="newUser.DisplayName" placeholder="Jane Smith" />
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Password</label>
+                        <input class="form-input" type="password" @bind="newUser.Password" placeholder="Min 6 chars + 1 digit" />
+                    </div>
+                    <div class="form-group">
+                        <label>Role</label>
+                        <select class="form-input" @bind="newUser.Role">
+                            <option value="User">User</option>
+                            <option value="TenantAdmin">TenantAdmin</option>
+                            <option value="Administrator">Administrator</option>
+                        </select>
+                    </div>
+                    @if (newUser.Role != "Administrator")
+                    {
+                        <div class="form-group">
+                            <label>Tenant</label>
+                            <select class="form-input" @bind="newUserTenantId">
+                                <option value="">— select tenant —</option>
+                                @foreach (var t in tenants.Where(t => t.IsActive))
+                                {
+                                    <option value="@t.Id">@t.Name</option>
+                                }
+                            </select>
+                        </div>
+                    }
+                </div>
+                <button class="btn-primary" @onclick="CreateUserAsync" disabled="@isBusy">
+                    @(isBusy ? "Creating…" : "Create User")
+                </button>
+            </div>
+        }
+
+        @if (isLoading)
+        {
+            <div class="loading-state"><div class="spinner"></div> Loading users…</div>
+        }
+        else if (users.Count == 0)
+        {
+            <div class="admin-empty">No users found.</div>
+        }
+        else
+        {
+            <div class="admin-table-wrap">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Role</th>
+                            <th>Tenant</th>
+                            <th>Status</th>
+                            <th>Joined</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var u in users)
+                        {
+                            <tr class="@(u.IsLocked ? "row-locked" : "")">
+                                <td>
+                                    <div class="user-cell">
+                                        <div class="user-avatar">@((u.DisplayName ?? u.Email)[0].ToString().ToUpper())</div>
+                                        <div>
+                                            <div class="user-name">@(u.DisplayName ?? u.Email)</div>
+                                            <div class="user-email">@u.Email</div>
+                                        </div>
+                                    </div>
+                                </td>
+                                <td><span class="role-badge role-@u.Role.ToLower()">@u.Role</span></td>
+                                <td>
+                                    @if (u.TenantName != null)
+                                    {
+                                        <button class="link-btn" @onclick="() => FilterUsersByTenant(u.TenantId!.Value, u.TenantName)">
+                                            @u.TenantName
+                                        </button>
+                                    }
+                                    else
+                                    {
+                                        <span class="muted">—</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (u.IsLocked)
+                                    {
+                                        <span class="status-badge inactive">🔒 Locked</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="status-badge active">Active</span>
+                                    }
+                                </td>
+                                <td class="muted">@u.CreatedAt.ToLocalTime().ToString("d MMM yyyy")</td>
+                                <td>
+                                    <div class="action-group">
+                                        @if (u.IsLocked)
+                                        {
+                                            <button class="btn-sm btn-success" @onclick="() => UnlockUserAsync(u.Id)">Unlock</button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn-sm btn-warn" @onclick="() => LockUserAsync(u.Id)">Lock</button>
+                                        }
+                                        <button class="btn-sm btn-danger" @onclick="() => DeleteUserAsync(u.Id, u.Email)"
+                                                disabled="@(u.Email == Auth.CurrentUser?.Email)">Delete</button>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private HttpClient Http = default!;
+    private string tab = "tenants";
+    private bool isLoading;
+    private bool isBusy;
+    private bool showTenantForm;
+    private bool showUserForm;
+    private string? message;
+    private bool isError;
+
+    private List<TenantSummary> tenants = [];
+    private List<UserSummary> users = [];
+
+    private CreateTenantRequest newTenant = new();
+    private CreateUserRequest newUser = new();
+    private string newUserTenantId = "";
+
+    private int? editingTenantId;
+    private string editTenantName = "";
+
+    private int? tenantFilter;
+    private string? tenantFilterName;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsAdmin) return;
+        Http = HttpFactory.CreateClient("TodoApi");
+        Http.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Auth.CurrentUser!.Token);
+        await LoadTenantsAsync();
+    }
+
+    private async Task SwitchTab(string newTab)
+    {
+        tab = newTab;
+        showTenantForm = false;
+        showUserForm = false;
+        message = null;
+        if (tab == "users") await LoadUsersAsync();
+        else await LoadTenantsAsync();
+    }
+
+    // ── Tenants ───────────────────────────────────────────────────────────────
+
+    private async Task LoadTenantsAsync()
+    {
+        isLoading = true;
+        try { tenants = await Http.GetFromJsonAsync<List<TenantSummary>>("/api/v1/admin/tenants") ?? []; }
+        catch { ShowError("Failed to load tenants."); }
+        finally { isLoading = false; }
+    }
+
+    private async Task CreateTenantAsync()
+    {
+        if (string.IsNullOrWhiteSpace(newTenant.Name) || string.IsNullOrWhiteSpace(newTenant.Slug))
+        { ShowError("Name and slug are required."); return; }
+
+        isBusy = true;
+        var resp = await Http.PostAsJsonAsync("/api/v1/admin/tenants", newTenant);
+        isBusy = false;
+
+        if (resp.IsSuccessStatusCode)
+        {
+            ShowSuccess($"Tenant '{newTenant.Name}' created.");
+            newTenant = new();
+            showTenantForm = false;
+            await LoadTenantsAsync();
+        }
+        else
+        {
+            var err = await TryReadError(resp);
+            ShowError(err ?? "Failed to create tenant.");
+        }
+    }
+
+    private void StartEditTenant(TenantSummary t)
+    {
+        editingTenantId = t.Id;
+        editTenantName = t.Name;
+    }
+
+    private async Task SaveTenantAsync(int id)
+    {
+        var resp = await Http.PutAsJsonAsync($"/api/v1/admin/tenants/{id}", new { Name = editTenantName });
+        editingTenantId = null;
+        if (resp.IsSuccessStatusCode) { ShowSuccess("Tenant updated."); await LoadTenantsAsync(); }
+        else ShowError("Failed to update tenant.");
+    }
+
+    private async Task ToggleTenantAsync(TenantSummary t)
+    {
+        var resp = await Http.PutAsJsonAsync($"/api/v1/admin/tenants/{t.Id}", new { IsActive = !t.IsActive });
+        if (resp.IsSuccessStatusCode) { ShowSuccess($"Tenant {(t.IsActive ? "deactivated" : "activated")}."); await LoadTenantsAsync(); }
+        else ShowError("Failed to update tenant.");
+    }
+
+    private async Task DeleteTenantAsync(int id)
+    {
+        var resp = await Http.DeleteAsync($"/api/v1/admin/tenants/{id}");
+        if (resp.IsSuccessStatusCode) { ShowSuccess("Tenant deleted."); await LoadTenantsAsync(); }
+        else ShowError("Cannot delete tenant — it may still have users.");
+    }
+
+    // ── Users ─────────────────────────────────────────────────────────────────
+
+    private async Task LoadUsersAsync()
+    {
+        isLoading = true;
+        var url = tenantFilter.HasValue ? $"/api/v1/admin/users?tenantId={tenantFilter}" : "/api/v1/admin/users";
+        try { users = await Http.GetFromJsonAsync<List<UserSummary>>(url) ?? []; }
+        catch { ShowError("Failed to load users."); }
+        finally { isLoading = false; }
+    }
+
+    private void FilterUsersByTenant(int id, string name)
+    {
+        tenantFilter = id;
+        tenantFilterName = name;
+        tab = "users";
+        _ = LoadUsersAsync();
+    }
+
+    private void ClearTenantFilter()
+    {
+        tenantFilter = null;
+        tenantFilterName = null;
+        _ = LoadUsersAsync();
+    }
+
+    private async Task CreateUserAsync()
+    {
+        if (string.IsNullOrWhiteSpace(newUser.Email) || string.IsNullOrWhiteSpace(newUser.Password))
+        { ShowError("Email and password are required."); return; }
+
+        if (newUser.Role != "Administrator" && string.IsNullOrEmpty(newUserTenantId))
+        { ShowError("Please select a tenant for this user."); return; }
+
+        newUser.TenantId = newUser.Role == "Administrator" ? null :
+            int.TryParse(newUserTenantId, out var tid) ? tid : null;
+
+        isBusy = true;
+        var resp = await Http.PostAsJsonAsync("/api/v1/admin/users", newUser);
+        isBusy = false;
+
+        if (resp.IsSuccessStatusCode)
+        {
+            ShowSuccess($"User '{newUser.Email}' created.");
+            newUser = new();
+            newUserTenantId = "";
+            showUserForm = false;
+            await LoadUsersAsync();
+        }
+        else
+        {
+            var err = await TryReadError(resp);
+            ShowError(err ?? "Failed to create user.");
+        }
+    }
+
+    private async Task LockUserAsync(string id)
+    {
+        var resp = await Http.PatchAsync($"/api/v1/admin/users/{id}/lock", null);
+        if (resp.IsSuccessStatusCode) { ShowSuccess("User locked."); await LoadUsersAsync(); }
+        else ShowError("Failed to lock user.");
+    }
+
+    private async Task UnlockUserAsync(string id)
+    {
+        var resp = await Http.PatchAsync($"/api/v1/admin/users/{id}/unlock", null);
+        if (resp.IsSuccessStatusCode) { ShowSuccess("User unlocked."); await LoadUsersAsync(); }
+        else ShowError("Failed to unlock user.");
+    }
+
+    private async Task DeleteUserAsync(string id, string email)
+    {
+        var resp = await Http.DeleteAsync($"/api/v1/admin/users/{id}");
+        if (resp.IsSuccessStatusCode) { ShowSuccess($"User '{email}' deleted."); await LoadUsersAsync(); }
+        else ShowError("Failed to delete user.");
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private void ShowSuccess(string msg) { message = msg; isError = false; }
+    private void ShowError(string msg) { message = msg; isError = true; }
+
+    private static async Task<string?> TryReadError(HttpResponseMessage resp)
+    {
+        try
+        {
+            var doc = await resp.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            if (doc.TryGetProperty("error", out var e)) return e.GetString();
+            if (doc.TryGetProperty("errors", out var es))
+                return string.Join(", ", es.EnumerateArray().Select(x => x.GetString()));
+        }
+        catch { }
+        return null;
+    }
+}

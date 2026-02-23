@@ -1,0 +1,151 @@
+@page "/"
+@using TodoApp.Web.Services
+@inject AuthService Auth
+@inject NavigationManager Nav
+
+<PageTitle>TodoApp — Simple, Fast, Focused</PageTitle>
+
+<div class="landing">
+
+    <!-- ── Navigation bar ───────────────────────────────────────────── -->
+    <nav class="landing-nav">
+        <span class="landing-nav-brand">📝 TodoApp</span>
+        <div class="landing-nav-actions">
+            @if (Auth.IsAuthenticated)
+            {
+                <a class="landing-nav-btn primary" href="/app">Open App →</a>
+            }
+            else
+            {
+                <a class="landing-nav-link" href="/login">Sign In</a>
+                <a class="landing-nav-btn primary" href="/login">Get Started</a>
+            }
+        </div>
+    </nav>
+
+    <!-- ── Hero ─────────────────────────────────────────────────────── -->
+    <header class="landing-hero">
+        <div class="hero-eyebrow">✨ Built for focus</div>
+        <h1 class="landing-title">
+            Get things done,<br />
+            <span class="title-gradient">without the noise.</span>
+        </h1>
+        <p class="landing-tagline">
+            A clean, fast todo app that stays out of your way — priorities, due dates,
+            search, and a trash bin for when you change your mind.
+        </p>
+        <div class="landing-cta">
+            @if (Auth.IsAuthenticated)
+            {
+                <a class="btn-hero-primary" href="/app">Go to my todos →</a>
+                <span class="cta-sub">Welcome back, @(Auth.CurrentUser?.DisplayName ?? Auth.CurrentUser?.Email)!</span>
+            }
+            else
+            {
+                <a class="btn-hero-primary" href="/login">Start for free</a>
+                <a class="btn-hero-secondary" href="/login">Sign in</a>
+            }
+        </div>
+        <div class="hero-badge-row">
+            <span class="hero-badge">🔒 Private by default</span>
+            <span class="hero-badge">⚡ No account sharing</span>
+            <span class="hero-badge">🌙 Dark mode</span>
+        </div>
+    </header>
+
+    <!-- ── Features grid ────────────────────────────────────────────── -->
+    <section class="landing-features">
+        <div class="section-header">
+            <h2>Everything you need, nothing you don't</h2>
+            <p>Thoughtfully designed so you spend time doing, not managing.</p>
+        </div>
+        <div class="feature-grid">
+            <div class="feature-card">
+                <div class="feature-icon-wrap" style="background:#ede9fe;">⚡</div>
+                <h3>Instant capture</h3>
+                <p>Add a task in two seconds. Title, priority, category — done. No forms, no friction.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon-wrap" style="background:#fce7f3;">🎯</div>
+                <h3>Priority levels</h3>
+                <p>Low, Medium, High. Colour-coded at a glance so you always know what needs attention.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon-wrap" style="background:#d1fae5;">🗂️</div>
+                <h3>Categories</h3>
+                <p>Group tasks by Work, Personal, Shopping — or anything that makes sense to you.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon-wrap" style="background:#fef3c7;">📅</div>
+                <h3>Due dates &amp; overdue alerts</h3>
+                <p>Set deadlines and see an instant warning banner when tasks have slipped past due.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon-wrap" style="background:#e0f2fe;">🔍</div>
+                <h3>Real-time search</h3>
+                <p>Server-side search across titles, notes, and categories. Find anything in under a second.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon-wrap" style="background:#fee2e2;">🗑️</div>
+                <h3>Trash &amp; restore</h3>
+                <p>Delete with confidence. Tasks go to trash first — restore them any time, or clear permanently.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── How it works ──────────────────────────────────────────────── -->
+    <section class="landing-steps">
+        <div class="section-header">
+            <h2>Up and running in 30 seconds</h2>
+        </div>
+        <div class="steps">
+            <div class="step">
+                <div class="step-num">1</div>
+                <div class="step-text">
+                    <strong>Sign in</strong>
+                    <span>Email and password — that's it. No verification emails, no credit card.</span>
+                </div>
+            </div>
+            <div class="step-connector"></div>
+            <div class="step">
+                <div class="step-num">2</div>
+                <div class="step-text">
+                    <strong>Add your first task</strong>
+                    <span>Type it, set a priority, press Enter. It's in your list instantly.</span>
+                </div>
+            </div>
+            <div class="step-connector"></div>
+            <div class="step">
+                <div class="step-num">3</div>
+                <div class="step-text">
+                    <strong>Stay on top of it</strong>
+                    <span>Filter by status, search by keyword, sort by priority or due date. Check things off.</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- ── CTA section ───────────────────────────────────────────────── -->
+    <section class="landing-cta-section">
+        <div class="landing-cta-inner">
+            <h2>Ready to clear your head?</h2>
+            <p>Join your team on TodoApp and start getting things done.</p>
+            @if (Auth.IsAuthenticated)
+            {
+                <a class="btn-hero-primary" href="/app">Open my todos →</a>
+            }
+            else
+            {
+                <a class="btn-hero-primary" href="/login">Get started free</a>
+            }
+        </div>
+    </section>
+
+    <footer class="landing-footer">
+        <p>TodoApp · Built with ASP.NET Core 10 &amp; Blazor</p>
+    </footer>
+</div>
+
+@code {
+    // Landing page: authenticated users see "Open App" CTA but can stay here
+}

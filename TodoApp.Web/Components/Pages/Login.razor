@@ -1,0 +1,69 @@
+@page "/login"
+@rendermode InteractiveServer
+@using TodoApp.Web.Services
+@inject AuthService Auth
+@inject NavigationManager Nav
+
+<PageTitle>Sign In — TodoApp</PageTitle>
+
+<div class="auth-page">
+    <div class="auth-card">
+        <a class="auth-home-link" href="/">← Back to home</a>
+        <div class="auth-logo">📝</div>
+        <h1 class="auth-title">TodoApp</h1>
+        <p class="auth-sub">Sign in to manage your tasks</p>
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="auth-error">⚠️ @errorMessage</div>
+        }
+
+        <div class="auth-form">
+            <div class="form-group">
+                <label>Email</label>
+                <input class="form-input" type="email" @bind="email" @bind:event="oninput"
+                       @onkeydown="HandleKeyDown" placeholder="you@example.com" autocomplete="email" />
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input class="form-input" type="password" @bind="password" @bind:event="oninput"
+                       @onkeydown="HandleKeyDown" placeholder="••••••" autocomplete="current-password" />
+            </div>
+            <button class="btn-auth" @onclick="HandleLogin" disabled="@(isBusy || !CanSubmit)">
+                @(isBusy ? "Signing in..." : "Sign In")
+            </button>
+        </div>
+    </div>
+</div>
+
+@code {
+    private string email = "";
+    private string password = "";
+    private string? errorMessage;
+    private bool isBusy;
+
+    private bool CanSubmit => !string.IsNullOrWhiteSpace(email) && !string.IsNullOrWhiteSpace(password);
+
+    protected override void OnInitialized()
+    {
+        if (Auth.IsAuthenticated)
+            Nav.NavigateTo("/app");
+    }
+
+    private async Task HandleLogin()
+    {
+        if (!CanSubmit) return;
+        isBusy = true;
+        errorMessage = null;
+        var (ok, err) = await Auth.LoginAsync(email, password);
+        isBusy = false;
+        if (ok) Nav.NavigateTo("/app");
+        else errorMessage = err;
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await HandleLogin();
+    }
+}
+

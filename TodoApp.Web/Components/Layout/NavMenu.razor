@@ -1,0 +1,146 @@
+@using TodoApp.Web.Services
+@inject AuthService Auth
+@inject NavigationManager Nav
+@inject IJSRuntime JSRuntime
+@implements IDisposable
+
+<div class="nav-bar">
+    <a class="nav-brand" href="/">📝 TodoApp</a>
+    <div class="nav-spacer"></div>
+    @if (Auth.IsAuthenticated)
+    {
+        <a class="nav-link @IsActive("/app")" href="/app">My Todos</a>
+
+        @if (Auth.IsAdmin)
+        {
+            <a class="nav-link @IsActive("/admin")" href="/admin">Admin</a>
+        }
+        else if (Auth.IsTenantAdmin)
+        {
+            <a class="nav-link @IsActive("/tenant")" href="/tenant">My Team</a>
+        }
+
+        <a class="nav-trash-link" href="/trash" title="Trash">
+            🗑️
+            @if (trashCount > 0)
+            {
+                <span class="nav-badge">@trashCount</span>
+            }
+        </a>
+        <span class="nav-user" title="@Auth.CurrentUser?.Email">
+            👤 @(Auth.CurrentUser?.DisplayName ?? Auth.CurrentUser?.Email)
+            @if (Auth.CurrentUser?.TenantName != null)
+            {
+                <span class="nav-tenant">@Auth.CurrentUser.TenantName</span>
+            }
+        </span>
+    }
+    <button class="nav-theme-btn" @onclick="ToggleTheme" title="@(isDark ? "Switch to light mode" : "Switch to dark mode")">
+        @(isDark ? "☀️" : "🌙")
+    </button>
+    @if (Auth.IsAuthenticated)
+    {
+        <button class="nav-logout" @onclick="LogoutAsync">Sign Out</button>
+    }
+    else
+    {
+        <a class="nav-login-btn" href="/login">Sign In</a>
+    }
+</div>
+
+@code {
+    private bool isDark;
+    private int trashCount;
+
+    protected override void OnInitialized()
+        => Auth.AuthStateChanged += OnAuthChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var theme = await JSRuntime.InvokeAsync<string>("themeManager.init");
+            isDark = theme == "dark";
+            StateHasChanged();
+        }
+    }
+
+    private string IsActive(string href)
+    {
+        var current = Nav.ToBaseRelativePath(Nav.Uri);
+        return ("/" + current).StartsWith(href, StringComparison.OrdinalIgnoreCase) ? "nav-link-active" : "";
+    }
+
+    private async Task ToggleTheme()
+    {
+        isDark = !isDark;
+        await JSRuntime.InvokeVoidAsync("themeManager.set", isDark ? "dark" : "light");
+    }
+
+    private void OnAuthChanged() => InvokeAsync(StateHasChanged);
+
+    private async Task LogoutAsync()
+    {
+        await Auth.LogoutAsync();
+        Nav.NavigateTo("/");
+    }
+
+    public void Dispose()
+        => Auth.AuthStateChanged -= OnAuthChanged;
+}
+
+<style>
+    .nav-bar {
+        background: linear-gradient(135deg, #6c63ff 0%, #a29bfe 100%);
+        padding: 14px 28px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        box-shadow: 0 2px 12px rgba(108,99,255,0.25);
+    }
+    .nav-brand {
+        color: #fff; font-size: 1.2rem; font-weight: 800;
+        text-decoration: none; letter-spacing: -0.3px;
+    }
+    .nav-brand:hover { opacity: 0.85; }
+    .nav-spacer { flex: 1; }
+    .nav-link {
+        color: rgba(255,255,255,0.85); text-decoration: none;
+        font-size: 0.88rem; font-weight: 600;
+        padding: 5px 10px; border-radius: 8px;
+        transition: background 0.15s;
+    }
+    .nav-link:hover, .nav-link-active { background: rgba(255,255,255,0.18); color: #fff; }
+    .nav-user {
+        color: rgba(255,255,255,0.9); font-size: 0.87rem;
+        display: flex; align-items: center; gap: 6px;
+    }
+    .nav-tenant {
+        background: rgba(255,255,255,0.2); border-radius: 10px;
+        padding: 1px 8px; font-size: 0.75rem; font-weight: 600;
+    }
+    .nav-logout, .nav-login-btn {
+        background: rgba(255,255,255,0.15); border: 1.5px solid rgba(255,255,255,0.4);
+        color: #fff; border-radius: 8px; padding: 6px 14px;
+        font-size: 0.82rem; font-weight: 600; cursor: pointer;
+        transition: background 0.15s; text-decoration: none;
+        display: inline-block;
+    }
+    .nav-logout:hover, .nav-login-btn:hover { background: rgba(255,255,255,0.28); }
+    .nav-theme-btn {
+        background: rgba(255,255,255,0.15); border: 1.5px solid rgba(255,255,255,0.4);
+        border-radius: 8px; padding: 5px 10px; cursor: pointer;
+        font-size: 1rem; transition: background 0.15s; line-height: 1;
+    }
+    .nav-theme-btn:hover { background: rgba(255,255,255,0.28); }
+    .nav-trash-link {
+        color: rgba(255,255,255,0.85); text-decoration: none;
+        font-size: 1.1rem; display: flex; align-items: center; gap: 4px;
+        padding: 5px 8px; border-radius: 8px; transition: background 0.15s;
+    }
+    .nav-trash-link:hover { background: rgba(255,255,255,0.18); color: #fff; }
+    .nav-badge {
+        background: #e74c3c; color: #fff; border-radius: 10px;
+        padding: 1px 7px; font-size: 0.72rem; font-weight: 700; line-height: 1.4;
+    }
+</style>

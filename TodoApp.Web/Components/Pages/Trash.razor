@@ -1,0 +1,133 @@
+@page "/trash"
+@rendermode InteractiveServer
+@using TodoApp.Web.Models
+@using TodoApp.Web.Services
+@inject AuthService Auth
+@inject TodoApiService TodoService
+@inject NavigationManager Nav
+
+<PageTitle>Trash — TodoApp</PageTitle>
+
+@if (!Auth.IsAuthenticated)
+{
+    Nav.NavigateTo("/login");
+    return;
+}
+
+<div class="trash-container">
+    <div class="trash-header">
+        <span>🗑️</span>
+        <h1>Trash</h1>
+        @if (items.Any())
+        {
+            <span class="trash-count">@items.Count item@(items.Count == 1 ? "" : "s")</span>
+        }
+        @if (items.Any())
+        {
+            <button class="btn-empty-trash" @onclick="EmptyTrash" disabled="@isBusy">
+                @(isBusy ? "Clearing…" : "Empty Trash")
+            </button>
+        }
+    </div>
+
+    <a class="back-link" href="/">← Back to todos</a>
+
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="alert-error" style="margin-top: 16px;">@message <button @onclick="() => message = null">✕</button></div>
+    }
+
+    <div style="margin-top: 20px;">
+        @if (isLoading)
+        {
+            <div class="loading-state"><div class="spinner"></div><span>Loading trash…</span></div>
+        }
+        else if (!items.Any())
+        {
+            <div class="trash-empty">
+                <span class="trash-icon">🗑️</span>
+                <p>Your trash is empty.</p>
+                <p style="font-size:0.85rem">Items you delete are kept here for recovery.</p>
+            </div>
+        }
+        else
+        {
+            @foreach (var item in items)
+            {
+                <div class="trash-item">
+                    <div class="trash-item-content">
+                        <div class="trash-item-title">@item.Title</div>
+                        <div class="trash-item-meta">
+                            @if (!string.IsNullOrEmpty(item.Category))
+                            {
+                                <span>📁 @item.Category · </span>
+                            }
+                            <span>🗑️ Deleted @(item.DeletedAt.HasValue ? item.DeletedAt.Value.ToLocalTime().ToString("MMM d, yyyy 'at' h:mm tt") : "unknown")</span>
+                        </div>
+                    </div>
+                    <div class="trash-item-actions">
+                        <button class="btn-restore" @onclick="() => Restore(item)" disabled="@isBusy">Restore</button>
+                        <button class="btn-perm-delete" @onclick="() => PermanentDelete(item)" disabled="@isBusy">Delete forever</button>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@code {
+    private List<TodoItem> items = [];
+    private bool isLoading = true;
+    private bool isBusy = false;
+    private string? message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsAuthenticated) return;
+        await LoadTrash();
+    }
+
+    private async Task LoadTrash()
+    {
+        isLoading = true;
+        try { items = await TodoService.GetTrashAsync(); }
+        catch (Exception ex) { message = $"Failed to load trash: {ex.Message}"; }
+        finally { isLoading = false; }
+    }
+
+    private async Task Restore(TodoItem item)
+    {
+        isBusy = true;
+        try
+        {
+            await TodoService.RestoreTodoAsync(item.Id);
+            items.Remove(item);
+        }
+        catch (Exception ex) { message = $"Restore failed: {ex.Message}"; }
+        finally { isBusy = false; }
+    }
+
+    private async Task PermanentDelete(TodoItem item)
+    {
+        isBusy = true;
+        try
+        {
+            await TodoService.PermanentDeleteAsync(item.Id);
+            items.Remove(item);
+        }
+        catch (Exception ex) { message = $"Delete failed: {ex.Message}"; }
+        finally { isBusy = false; }
+    }
+
+    private async Task EmptyTrash()
+    {
+        isBusy = true;
+        try
+        {
+            await TodoService.EmptyTrashAsync();
+            items.Clear();
+        }
+        catch (Exception ex) { message = $"Empty trash failed: {ex.Message}"; }
+        finally { isBusy = false; }
+    }
+}

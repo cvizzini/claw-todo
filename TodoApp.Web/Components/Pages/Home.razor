@@ -1,0 +1,449 @@
+@page "/app"
+@rendermode InteractiveServer
+@using TodoApp.Web.Models
+@using TodoApp.Web.Services
+@inject AuthService Auth
+@inject TodoApiService TodoService
+@inject NavigationManager Nav
+
+<PageTitle>My Todos</PageTitle>
+
+@if (!Auth.IsAuthenticated)
+{
+    return;
+}
+
+<div class="todo-container">
+
+    <!-- Stats -->
+    @if (stats is not null)
+    {
+        <div class="stats-bar">
+            <div class="stat">
+                <span class="stat-num">@stats.Total</span>
+                <span class="stat-label">Total</span>
+            </div>
+            <div class="stat active">
+                <span class="stat-num">@stats.Active</span>
+                <span class="stat-label">Active</span>
+            </div>
+            <div class="stat done">
+                <span class="stat-num">@stats.Completed</span>
+                <span class="stat-label">Done</span>
+            </div>
+            @if (stats.Overdue > 0)
+            {
+                <div class="stat" style="color: var(--danger)">
+                    <span class="stat-num" style="color: #e74c3c">@stats.Overdue</span>
+                    <span class="stat-label">Overdue</span>
+                </div>
+            }
+        </div>
+    }
+
+    <!-- Overdue Banner -->
+    @if (stats is not null && stats.Overdue > 0 && !overdrueBannerDismissed)
+    {
+        <div class="overdue-banner">
+            <span>⏰ You have @stats.Overdue overdue task@(stats.Overdue == 1 ? "" : "s").</span>
+            <button @onclick="ViewOverdue">View them</button>
+            <button class="dismiss" @onclick="() => overdrueBannerDismissed = true" title="Dismiss">✕</button>
+        </div>
+    }
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="alert-error">
+            ⚠️ @errorMessage
+            <button @onclick="() => errorMessage = null">✕</button>
+        </div>
+    }
+
+    <!-- Add form -->
+    <div class="add-form card">
+        <div class="add-form-row">
+            <input class="input-title"
+                   @bind="newTitle" @bind:event="oninput"
+                   @onkeydown="HandleAddKeyDown"
+                   placeholder="What needs to be done?"
+                   maxlength="200" />
+            <button class="btn-add" @onclick="AddTodo"
+                    disabled="@(string.IsNullOrWhiteSpace(newTitle) || isSaving)">
+                @(isSaving ? "Adding…" : "+ Add")
+            </button>
+        </div>
+        <div class="add-form-meta">
+            <select class="select-sm" @bind="newPriority">
+                <option value="@Priority.Low">🟢 Low</option>
+                <option value="@Priority.Medium">🟡 Medium</option>
+                <option value="@Priority.High">🔴 High</option>
+            </select>
+            <input class="input-sm" @bind="newCategory" placeholder="Category (optional)" maxlength="50" />
+            <input class="input-sm" type="date" @bind="newDueDate" />
+        </div>
+    </div>
+
+    <!-- Search + Filters -->
+    <div class="filters">
+        <div class="search-row">
+            <input class="input-search"
+                   @oninput="OnSearchInput"
+                   value="@searchQuery"
+                   placeholder="🔍 Search todos..."
+                   maxlength="100" />
+            @if (!string.IsNullOrEmpty(searchQuery))
+            {
+                <button class="btn-clear-search" @onclick="ClearSearch">✕</button>
+            }
+        </div>
+        <div class="filter-row">
+            <div class="filter-tabs">
+                <button class="tab @(activeFilter == "all"    ? "active" : "")" @onclick='() => SetFilter("all")'>All</button>
+                <button class="tab @(activeFilter == "active" ? "active" : "")" @onclick='() => SetFilter("active")'>Active</button>
+                <button class="tab @(activeFilter == "done"   ? "active" : "")" @onclick='() => SetFilter("done")'>Done</button>
+            </div>
+            <div class="filter-controls">
+                @if (categories.Any())
+                {
+                    <select class="select-sm" @bind="categoryFilter" @bind:after="ResetAndLoad">
+                        <option value="">All Categories</option>
+                        @foreach (var cat in categories)
+                        {
+                            <option value="@cat">@cat</option>
+                        }
+                    </select>
+                }
+                <select class="select-sm" @bind="sortBy" @bind:after="ResetAndLoad">
+                    <option value="">Sort: Default</option>
+                    <option value="title">Sort: Title</option>
+                    <option value="priority">Sort: Priority</option>
+                    <option value="dueDate">Sort: Due Date</option>
+                    <option value="updatedAt">Sort: Recently Updated</option>
+                </select>
+                <button class="btn-sort-dir" @onclick="ToggleSortDir" title="@(sortDesc ? "Descending" : "Ascending")">
+                    @(sortDesc ? "↓" : "↑")
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Todo list -->
+    <div class="todo-list">
+        @if (isLoading)
+        {
+            <div class="loading-state">
+                <div class="spinner"></div>
+                <span>Loading…</span>
+            </div>
+        }
+        else if (!pagedResult.Items.Any())
+        {
+            <div class="empty-state">
+                @if (!string.IsNullOrEmpty(searchQuery))
+                {
+                    <span>No todos matching "@searchQuery" 🔍</span>
+                }
+                else
+                {
+                    @(activeFilter == "done"   ? "No completed tasks yet. Keep going! 💪"
+                    : activeFilter == "active" ? "All caught up! 🎉"
+                    : "Your list is empty. Add something above!")
+                }
+            </div>
+        }
+        else
+        {
+            @foreach (var todo in pagedResult.Items)
+            {
+                <div class="todo-item priority-@todo.Priority.ToString().ToLower() @(todo.IsCompleted ? "completed" : "")">
+                    <div class="todo-left">
+                        <input type="checkbox" class="checkbox"
+                               checked="@todo.IsCompleted"
+                               @onchange="() => ToggleTodo(todo)" />
+
+                        @if (editingId == todo.Id)
+                        {
+                            <div class="edit-group">
+                                <input class="edit-input" @bind="editTitle"
+                                       @onkeydown="(e) => HandleEditKeyDown(e, todo)"
+                                       @onblur="() => SaveEdit(todo)" />
+                                <select class="select-sm" @bind="editPriority">
+                                    <option value="@Priority.Low">🟢 Low</option>
+                                    <option value="@Priority.Medium">🟡 Medium</option>
+                                    <option value="@Priority.High">🔴 High</option>
+                                </select>
+                                <input class="input-sm" @bind="editCategory" placeholder="Category" />
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="todo-content" @ondblclick="() => StartEdit(todo)">
+                                <span class="todo-title">@todo.Title</span>
+                                @if (!string.IsNullOrEmpty(todo.Notes))
+                                {
+                                    <span class="todo-notes">@todo.Notes</span>
+                                }
+                                <div class="todo-meta">
+                                    @if (!string.IsNullOrEmpty(todo.Category))
+                                    {
+                                        <span class="badge badge-cat">@todo.Category</span>
+                                    }
+                                    @if (todo.DueDate.HasValue)
+                                    {
+                                        var overdue = !todo.IsCompleted && todo.DueDate < DateTime.UtcNow;
+                                        <span class="badge @(overdue ? "badge-overdue" : "badge-due")">
+                                            📅 @todo.DueDate.Value.ToLocalTime().ToString("MMM d")
+                                        </span>
+                                    }
+                                    <span class="todo-date">@todo.CreatedAt.ToLocalTime().ToString("MMM d")</span>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                    <div class="todo-right">
+                        <span class="priority-badge priority-@todo.Priority.ToString().ToLower()">@todo.Priority</span>
+                        <button class="btn-icon" @onclick="() => StartEdit(todo)" title="Edit">✏️</button>
+                        <button class="btn-icon btn-delete" @onclick="() => DeleteTodo(todo)" title="Delete">🗑️</button>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+
+    <!-- Pagination -->
+    @if (pagedResult.TotalPages > 1)
+    {
+        <div class="pagination">
+            <button class="btn-page" @onclick="PrevPage" disabled="@(!pagedResult.HasPreviousPage)">← Prev</button>
+            <span class="page-info">Page @pagedResult.Page of @pagedResult.TotalPages (@pagedResult.TotalCount total)</span>
+            <button class="btn-page" @onclick="NextPage" disabled="@(!pagedResult.HasNextPage)">Next →</button>
+        </div>
+    }
+    else if (pagedResult.TotalCount > 0)
+    {
+        <div class="pagination-info">@pagedResult.TotalCount item@(pagedResult.TotalCount == 1 ? "" : "s")</div>
+    }
+
+    @if (pagedResult.Items.Any(t => t.IsCompleted))
+    {
+        <div class="footer-bar">
+            <button class="btn-clear" @onclick="ClearCompleted">
+                Clear completed (@pagedResult.Items.Count(t => t.IsCompleted))
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    private PagedResult<TodoItem> pagedResult = new();
+    private TodoStats? stats;
+    private List<string> categories = [];
+
+    private string newTitle    = "";
+    private Priority newPriority = Priority.Medium;
+    private string newCategory = "";
+    private DateTime? newDueDate;
+
+    private int? editingId;
+    private string editTitle    = "";
+    private Priority editPriority = Priority.Medium;
+    private string editCategory = "";
+
+    private string activeFilter  = "all";
+    private string categoryFilter = "";
+    private string searchQuery   = "";
+    private string sortBy        = "";
+    private bool   sortDesc      = false;
+    private int    currentPage   = 1;
+    private const int PageSize   = 20;
+    private bool overdrueBannerDismissed = false;
+
+    private bool isLoading;
+    private bool isSaving;
+    private string? errorMessage;
+
+    private System.Timers.Timer? _searchDebounce;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.IsAuthenticated)
+        {
+            Nav.NavigateTo("/login");
+            return;
+        }
+        await Task.WhenAll(LoadTodos(), LoadCategories(), LoadStats());
+    }
+
+    private async Task LoadTodos()
+    {
+        isLoading = true;
+        StateHasChanged();
+        try
+        {
+            bool? completed = activeFilter switch { "done" => true, "active" => false, _ => null };
+            pagedResult = await TodoService.GetTodosAsync(new TodoQuery
+            {
+                Completed = completed,
+                Category  = string.IsNullOrEmpty(categoryFilter) ? null : categoryFilter,
+                Search    = string.IsNullOrEmpty(searchQuery) ? null : searchQuery,
+                SortBy    = string.IsNullOrEmpty(sortBy) ? null : sortBy,
+                SortDesc  = sortDesc,
+                Page      = currentPage,
+                PageSize  = PageSize
+            });
+        }
+        catch (Exception ex) { errorMessage = $"Load failed: {ex.Message}"; }
+        finally { isLoading = false; }
+    }
+
+    private async Task LoadCategories()
+    {
+        try { categories = await TodoService.GetCategoriesAsync(); } catch { }
+    }
+
+    private async Task LoadStats()
+    {
+        try { stats = await TodoService.GetStatsAsync(); } catch { }
+    }
+
+    private async Task ResetAndLoad()
+    {
+        currentPage = 1;
+        await LoadTodos();
+    }
+
+    private async Task ViewOverdue()
+    {
+        activeFilter = "active";
+        sortBy = "dueDate";
+        sortDesc = false;
+        overdrueBannerDismissed = true;
+        currentPage = 1;
+        await LoadTodos();
+    }
+
+    private async Task SetFilter(string f)
+    {
+        activeFilter = f;
+        currentPage  = 1;
+        await LoadTodos();
+    }
+
+    private void OnSearchInput(ChangeEventArgs e)
+    {
+        searchQuery = e.Value?.ToString() ?? "";
+        _searchDebounce?.Stop();
+        _searchDebounce = new System.Timers.Timer(400);
+        _searchDebounce.Elapsed += async (_, _) =>
+        {
+            _searchDebounce.Stop();
+            currentPage = 1;
+            await InvokeAsync(async () => { await LoadTodos(); StateHasChanged(); });
+        };
+        _searchDebounce.Start();
+    }
+
+    private async Task ClearSearch()
+    {
+        searchQuery = "";
+        currentPage = 1;
+        await LoadTodos();
+    }
+
+    private async Task ToggleSortDir()
+    {
+        sortDesc    = !sortDesc;
+        currentPage = 1;
+        await LoadTodos();
+    }
+
+    private async Task PrevPage()
+    {
+        if (pagedResult.HasPreviousPage)
+        {
+            currentPage--;
+            await LoadTodos();
+        }
+    }
+
+    private async Task NextPage()
+    {
+        if (pagedResult.HasNextPage)
+        {
+            currentPage++;
+            await LoadTodos();
+        }
+    }
+
+    private async Task AddTodo()
+    {
+        if (string.IsNullOrWhiteSpace(newTitle)) return;
+        isSaving = true;
+        try
+        {
+            await TodoService.CreateTodoAsync(new CreateTodoRequest
+            {
+                Title    = newTitle,
+                Priority = newPriority,
+                Category = string.IsNullOrWhiteSpace(newCategory) ? null : newCategory,
+                DueDate  = newDueDate?.ToUniversalTime()
+            });
+            newTitle = ""; newDueDate = null;
+            await Task.WhenAll(LoadTodos(), LoadStats(), LoadCategories());
+        }
+        catch (Exception ex) { errorMessage = $"Add failed: {ex.Message}"; }
+        finally { isSaving = false; }
+    }
+
+    private async Task HandleAddKeyDown(KeyboardEventArgs e)
+    { if (e.Key == "Enter") await AddTodo(); }
+
+    private void StartEdit(TodoItem t)
+    {
+        editingId    = t.Id;
+        editTitle    = t.Title;
+        editPriority = t.Priority;
+        editCategory = t.Category ?? "";
+    }
+
+    private async Task SaveEdit(TodoItem todo)
+    {
+        if (editingId != todo.Id || string.IsNullOrWhiteSpace(editTitle)) { editingId = null; return; }
+        try
+        {
+            await TodoService.UpdateTodoAsync(todo.Id, new UpdateTodoRequest
+            {
+                Title       = editTitle,
+                Notes       = todo.Notes,
+                IsCompleted = todo.IsCompleted,
+                Priority    = editPriority,
+                Category    = string.IsNullOrWhiteSpace(editCategory) ? null : editCategory,
+                DueDate     = todo.DueDate
+            });
+            editingId = null;
+            await Task.WhenAll(LoadTodos(), LoadStats(), LoadCategories());
+        }
+        catch (Exception ex) { errorMessage = $"Save failed: {ex.Message}"; }
+    }
+
+    private async Task HandleEditKeyDown(KeyboardEventArgs e, TodoItem t)
+    { if (e.Key == "Enter") await SaveEdit(t); if (e.Key == "Escape") editingId = null; }
+
+    private async Task ToggleTodo(TodoItem t)
+    {
+        try { await TodoService.ToggleTodoAsync(t.Id); await Task.WhenAll(LoadTodos(), LoadStats()); }
+        catch (Exception ex) { errorMessage = $"Toggle failed: {ex.Message}"; }
+    }
+
+    private async Task DeleteTodo(TodoItem t)
+    {
+        try { await TodoService.DeleteTodoAsync(t.Id); await Task.WhenAll(LoadTodos(), LoadStats(), LoadCategories()); }
+        catch (Exception ex) { errorMessage = $"Delete failed: {ex.Message}"; }
+    }
+
+    private async Task ClearCompleted()
+    {
+        try { await TodoService.ClearCompletedAsync(); await Task.WhenAll(LoadTodos(), LoadStats(), LoadCategories()); }
+        catch (Exception ex) { errorMessage = $"Clear failed: {ex.Message}"; }
+    }
+}

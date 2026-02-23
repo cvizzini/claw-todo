@@ -1,0 +1,17 @@
+@using TodoApp.Web.Services
+@inject AuthService Auth
+
+<Router AppAssembly="typeof(Program).Assembly" NotFoundPage="typeof(Pages.NotFound)">
+    <Found Context="routeData">
+        <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+        <FocusOnNavigate RouteData="routeData" Selector="h1" />
+    </Found>
+</Router>
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !Auth.IsAuthenticated)
+            await Auth.TryRestoreSessionAsync();
+    }
+}
