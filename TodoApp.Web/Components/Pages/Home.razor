@@ -330,17 +330,36 @@
     {
         if (!firstRender) return;
 
-        if (!Auth.IsAuthenticated)
-            await Auth.TryRestoreSessionAsync();
-
-        isCheckingAuth = false;
+        try
+        {
+            if (!Auth.IsAuthenticated)
+                await Auth.TryRestoreSessionAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Session restore failed: {ex.Message}";
+        }
+        finally
+        {
+            isCheckingAuth = false;
+            StateHasChanged();
+        }
 
         if (Auth.IsAuthenticated)
-            await Task.WhenAll(LoadTodos(), LoadCategories(), LoadStats());
+        {
+            try
+            {
+                await Task.WhenAll(LoadTodos(), LoadCategories(), LoadStats());
+            }
+            catch (Exception ex)
+            {
+                errorMessage = $"Failed to load data: {ex.Message}";
+                StateHasChanged();
+            }
+        }
         else
         {
             Nav.NavigateTo("/login");
-            StateHasChanged();
         }
     }
 
@@ -371,7 +390,11 @@
             });
         }
         catch (Exception ex) { errorMessage = $"Load failed: {ex.Message}"; }
-        finally { isLoading = false; }
+        finally 
+        { 
+            isLoading = false;
+            StateHasChanged();
+        }
     }
 
     private async Task LoadCategories()

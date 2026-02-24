@@ -173,21 +173,36 @@
     {
         if (!firstRender) return;
 
-        if (!Auth.IsAuthenticated)
-            await Auth.TryRestoreSessionAsync();
-
-        isCheckingAuth = false;
+        try
+        {
+            if (!Auth.IsAuthenticated)
+                await Auth.TryRestoreSessionAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowError($"Session restore failed: {ex.Message}");
+        }
+        finally
+        {
+            isCheckingAuth = false;
+            StateHasChanged();
+        }
 
         if (Auth.IsTenantAdmin)
         {
             Http = HttpFactory.CreateClient("TodoApi");
             Http.DefaultRequestHeaders.Authorization =
                 new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Auth.CurrentUser!.Token);
-            await LoadUsersAsync();
-        }
-        else
-        {
-            StateHasChanged();
+
+            try
+            {
+                await LoadUsersAsync();
+            }
+            catch (Exception ex)
+            {
+                ShowError($"Failed to load data: {ex.Message}");
+                StateHasChanged();
+            }
         }
     }
 
@@ -198,9 +213,14 @@
     private async Task LoadUsersAsync()
     {
         isLoading = true;
+        StateHasChanged();
         try { users = await Http.GetFromJsonAsync<List<UserSummary>>("/api/v1/tenant/users") ?? []; }
         catch { ShowError("Failed to load users."); }
-        finally { isLoading = false; }
+        finally 
+        { 
+            isLoading = false;
+            StateHasChanged();
+        }
     }
 
     private async Task CreateUserAsync()

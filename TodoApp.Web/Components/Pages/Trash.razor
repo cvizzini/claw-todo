@@ -97,17 +97,36 @@
     {
         if (!firstRender) return;
 
-        if (!Auth.IsAuthenticated)
-            await Auth.TryRestoreSessionAsync();
-
-        isCheckingAuth = false;
+        try
+        {
+            if (!Auth.IsAuthenticated)
+                await Auth.TryRestoreSessionAsync();
+        }
+        catch (Exception ex)
+        {
+            message = $"Session restore failed: {ex.Message}";
+        }
+        finally
+        {
+            isCheckingAuth = false;
+            StateHasChanged();
+        }
 
         if (Auth.IsAuthenticated)
-            await LoadTrash();
+        {
+            try
+            {
+                await LoadTrash();
+            }
+            catch (Exception ex)
+            {
+                message = $"Failed to load data: {ex.Message}";
+                StateHasChanged();
+            }
+        }
         else
         {
             Nav.NavigateTo("/login");
-            StateHasChanged();
         }
     }
 
@@ -118,9 +137,14 @@
     private async Task LoadTrash()
     {
         isLoading = true;
+        StateHasChanged();
         try { items = await TodoService.GetTrashAsync(); }
         catch (Exception ex) { message = $"Failed to load trash: {ex.Message}"; }
-        finally { isLoading = false; }
+        finally 
+        { 
+            isLoading = false;
+            StateHasChanged();
+        }
     }
 
     private async Task Restore(TodoItem item)
