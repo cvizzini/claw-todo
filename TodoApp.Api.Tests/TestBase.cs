@@ -3,8 +3,8 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.Extensions.DependencyInjection;
-using TodoApp.Api.Data;
-using TodoApp.Api.Models;
+using TodoApp.Domain.Entities;
+using TodoApp.Infrastructure.Data;
 
 namespace TodoApp.Api.Tests;
 
