@@ -20,225 +20,274 @@
     return;
 }
 
-<div class="todo-container">
+<div class="app-shell">
 
-    <!-- Stats -->
-    @if (stats is not null)
-    {
-        <div class="stats-bar">
-            <div class="stat">
-                <span class="stat-num">@stats.Total</span>
-                <span class="stat-label">Total</span>
-            </div>
-            <div class="stat active">
-                <span class="stat-num">@stats.Active</span>
-                <span class="stat-label">Active</span>
-            </div>
-            <div class="stat done">
-                <span class="stat-num">@stats.Completed</span>
-                <span class="stat-label">Done</span>
-            </div>
-            @if (stats.Overdue > 0)
-            {
-                <div class="stat" style="color: var(--danger)">
-                    <span class="stat-num" style="color: #e74c3c">@stats.Overdue</span>
-                    <span class="stat-label">Overdue</span>
-                </div>
-            }
-        </div>
-    }
-
-    <!-- Overdue Banner -->
-    @if (stats is not null && stats.Overdue > 0 && !overdrueBannerDismissed)
-    {
-        <div class="overdue-banner">
-            <span>⏰ You have @stats.Overdue overdue task@(stats.Overdue == 1 ? "" : "s").</span>
-            <button @onclick="ViewOverdue">View them</button>
-            <button class="dismiss" @onclick="() => overdrueBannerDismissed = true" title="Dismiss">✕</button>
-        </div>
-    }
-
-    @if (!string.IsNullOrEmpty(errorMessage))
-    {
-        <div class="alert-error">
-            ⚠️ @errorMessage
-            <button @onclick="() => errorMessage = null">✕</button>
-        </div>
-    }
-
-    <!-- Add form -->
-    <div class="add-form card">
-        <div class="add-form-row">
-            <input class="input-title"
-                   @bind="newTitle" @bind:event="oninput"
-                   @onkeydown="HandleAddKeyDown"
-                   placeholder="What needs to be done?"
-                   maxlength="200" />
-            <button class="btn-add" @onclick="AddTodo"
-                    disabled="@(string.IsNullOrWhiteSpace(newTitle) || isSaving)">
-                @(isSaving ? "Adding…" : "+ Add")
-            </button>
-        </div>
-        <div class="add-form-meta">
-            <select class="select-sm" @bind="newPriority">
-                <option value="@Priority.Low">🟢 Low</option>
-                <option value="@Priority.Medium">🟡 Medium</option>
-                <option value="@Priority.High">🔴 High</option>
-            </select>
-            <input class="input-sm" @bind="newCategory" placeholder="Category (optional)" maxlength="50" />
-            <input class="input-sm" type="date" @bind="newDueDate" />
-        </div>
-    </div>
-
-    <!-- Search + Filters -->
-    <div class="filters">
-        <div class="search-row">
-            <input class="input-search"
-                   @oninput="OnSearchInput"
-                   value="@searchQuery"
-                   placeholder="🔍 Search todos..."
-                   maxlength="100" />
-            @if (!string.IsNullOrEmpty(searchQuery))
-            {
-                <button class="btn-clear-search" @onclick="ClearSearch">✕</button>
-            }
-        </div>
-        <div class="filter-row">
-            <div class="filter-tabs">
-                <button class="tab @(activeFilter == "all"    ? "active" : "")" @onclick='() => SetFilter("all")'>All</button>
-                <button class="tab @(activeFilter == "active" ? "active" : "")" @onclick='() => SetFilter("active")'>Active</button>
-                <button class="tab @(activeFilter == "done"   ? "active" : "")" @onclick='() => SetFilter("done")'>Done</button>
-            </div>
-            <div class="filter-controls">
-                @if (categories.Any())
+    <!-- ── Left panel ─────────────────────────────────────────── -->
+    <aside class="app-sidebar">
+        <div class="sidebar-user">
+            <div class="sidebar-avatar">@((Auth.CurrentUser?.DisplayName ?? Auth.CurrentUser?.Email ?? "?")[0].ToString().ToUpper())</div>
+            <div>
+                <div class="sidebar-name">@(Auth.CurrentUser?.DisplayName ?? Auth.CurrentUser?.Email)</div>
+                @if (Auth.CurrentUser?.TenantName is not null)
                 {
-                    <select class="select-sm" @bind="categoryFilter" @bind:after="ResetAndLoad">
-                        <option value="">All Categories</option>
-                        @foreach (var cat in categories)
-                        {
-                            <option value="@cat">@cat</option>
-                        }
-                    </select>
+                    <div class="sidebar-tenant">@Auth.CurrentUser.TenantName</div>
                 }
-                <select class="select-sm" @bind="sortBy" @bind:after="ResetAndLoad">
+            </div>
+        </div>
+
+        @if (stats is not null)
+        {
+            <div class="sidebar-stats">
+                <div class="stat-row @(activeFilter == "all" ? "stat-row-active" : "")" @onclick='() => SetFilter("all")'>
+                    <span class="stat-icon">📋</span>
+                    <span class="stat-label">All tasks</span>
+                    <span class="stat-pill">@stats.Total</span>
+                </div>
+                <div class="stat-row @(activeFilter == "active" ? "stat-row-active" : "")" @onclick='() => SetFilter("active")'>
+                    <span class="stat-icon">⚡</span>
+                    <span class="stat-label">Active</span>
+                    <span class="stat-pill stat-pill-primary">@stats.Active</span>
+                </div>
+                <div class="stat-row @(activeFilter == "done" ? "stat-row-active" : "")" @onclick='() => SetFilter("done")'>
+                    <span class="stat-icon">✅</span>
+                    <span class="stat-label">Completed</span>
+                    <span class="stat-pill stat-pill-success">@stats.Completed</span>
+                </div>
+                @if (stats.Overdue > 0)
+                {
+                    <div class="stat-row stat-row-danger" @onclick="ViewOverdue">
+                        <span class="stat-icon">⚠️</span>
+                        <span class="stat-label">Overdue</span>
+                        <span class="stat-pill stat-pill-danger">@stats.Overdue</span>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (categories.Any())
+        {
+            <div class="sidebar-section-label">Categories</div>
+            <div class="sidebar-cats">
+                <div class="cat-item @(categoryFilter == "" ? "cat-active" : "")" @onclick='() => SetCategory("")'>All</div>
+                @foreach (var cat in categories)
+                {
+                    <div class="cat-item @(categoryFilter == cat ? "cat-active" : "")" @onclick="() => SetCategory(cat)">@cat</div>
+                }
+            </div>
+        }
+
+        <div class="sidebar-links">
+            <a href="/trash" class="sidebar-link">🗑️ Trash</a>
+            @if (Auth.IsAdmin) { <a href="/admin" class="sidebar-link">⚙️ Admin</a> }
+            else if (Auth.IsTenantAdmin) { <a href="/tenant" class="sidebar-link">👥 My Team</a> }
+        </div>
+    </aside>
+
+    <!-- ── Main content ───────────────────────────────────────── -->
+    <main class="app-main">
+
+        <!-- Overdue banner -->
+        @if (stats is not null && stats.Overdue > 0 && !overdrueBannerDismissed)
+        {
+            <div class="overdue-banner">
+                <span>⚠️ You have @stats.Overdue overdue task@(stats.Overdue == 1 ? "" : "s")</span>
+                <button @onclick="ViewOverdue">View them</button>
+                <button class="dismiss" @onclick="() => overdrueBannerDismissed = true" title="Dismiss">✕</button>
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(errorMessage))
+        {
+            <div class="alert-error">⚠️ @errorMessage <button @onclick="() => errorMessage = null">✕</button></div>
+        }
+
+        <!-- Add form -->
+        <div class="add-card">
+            <div class="add-main-row">
+                <div class="add-icon">+</div>
+                <input class="add-input"
+                       @bind="newTitle" @bind:event="oninput"
+                       @onkeydown="HandleAddKeyDown"
+                       placeholder="Add a new task…"
+                       maxlength="200" />
+                <button class="btn-add" @onclick="AddTodo"
+                        disabled="@(string.IsNullOrWhiteSpace(newTitle) || isSaving)">
+                    @(isSaving ? "Adding…" : "Add task")
+                </button>
+            </div>
+            <div class="add-meta-row">
+                <div class="meta-item">
+                    <span class="meta-icon">🚩</span>
+                    <select class="meta-select" @bind="newPriority">
+                        <option value="@Priority.Low">Low</option>
+                        <option value="@Priority.Medium">Medium</option>
+                        <option value="@Priority.High">High</option>
+                    </select>
+                </div>
+                <div class="meta-item">
+                    <span class="meta-icon">🏷️</span>
+                    <input class="meta-input" @bind="newCategory" placeholder="Category" maxlength="50" />
+                </div>
+                <div class="meta-item">
+                    <span class="meta-icon">📅</span>
+                    <input class="meta-input" type="date" @bind="newDueDate" />
+                </div>
+            </div>
+        </div>
+
+        <!-- Toolbar -->
+        <div class="toolbar">
+            <div class="search-wrap">
+                <span class="search-icon">🔍</span>
+                <input class="search-input"
+                       @oninput="OnSearchInput"
+                       value="@searchQuery"
+                       placeholder="Search tasks…"
+                       maxlength="100" />
+                @if (!string.IsNullOrEmpty(searchQuery))
+                {
+                    <button class="search-clear" @onclick="ClearSearch">✕</button>
+                }
+            </div>
+            <div class="toolbar-filters">
+                <div class="filter-tabs">
+                    <button class="ftab @(activeFilter == "all"    ? "ftab-on" : "")" @onclick='() => SetFilter("all")'>All</button>
+                    <button class="ftab @(activeFilter == "active" ? "ftab-on" : "")" @onclick='() => SetFilter("active")'>Active</button>
+                    <button class="ftab @(activeFilter == "done"   ? "ftab-on" : "")" @onclick='() => SetFilter("done")'>Done</button>
+                </div>
+                <select class="sort-select" @bind="sortBy" @bind:after="ResetAndLoad">
                     <option value="">Sort: Default</option>
-                    <option value="title">Sort: Title</option>
-                    <option value="priority">Sort: Priority</option>
-                    <option value="dueDate">Sort: Due Date</option>
-                    <option value="updatedAt">Sort: Recently Updated</option>
+                    <option value="title">Title</option>
+                    <option value="priority">Priority</option>
+                    <option value="dueDate">Due Date</option>
+                    <option value="updatedAt">Last Updated</option>
                 </select>
-                <button class="btn-sort-dir" @onclick="ToggleSortDir" title="@(sortDesc ? "Descending" : "Ascending")">
+                <button class="sort-dir" @onclick="ToggleSortDir" title="@(sortDesc ? "Descending" : "Ascending")">
                     @(sortDesc ? "↓" : "↑")
                 </button>
             </div>
         </div>
-    </div>
 
-    <!-- Todo list -->
-    <div class="todo-list">
-        @if (isLoading)
-        {
-            <div class="loading-state">
-                <div class="spinner"></div>
-                <span>Loading…</span>
-            </div>
-        }
-        else if (!pagedResult.Items.Any())
-        {
-            <div class="empty-state">
-                @if (!string.IsNullOrEmpty(searchQuery))
-                {
-                    <span>No todos matching "@searchQuery" 🔍</span>
-                }
-                else
-                {
-                    @(activeFilter == "done"   ? "No completed tasks yet. Keep going! 💪"
-                    : activeFilter == "active" ? "All caught up! 🎉"
-                    : "Your list is empty. Add something above!")
-                }
-            </div>
-        }
-        else
-        {
-            @foreach (var todo in pagedResult.Items)
+        <!-- List -->
+        <div class="todo-list">
+            @if (isLoading)
             {
-                <div class="todo-item priority-@todo.Priority.ToString().ToLower() @(todo.IsCompleted ? "completed" : "")">
-                    <div class="todo-left">
-                        <input type="checkbox" class="checkbox"
-                               checked="@todo.IsCompleted"
-                               @onchange="() => ToggleTodo(todo)" />
+                <div class="loading-state"><div class="spinner"></div> Loading…</div>
+            }
+            else if (!pagedResult.Items.Any())
+            {
+                <div class="empty-state">
+                    <div class="empty-icon">
+                        @if (!string.IsNullOrEmpty(searchQuery)) { <span>🔍</span> }
+                        else if (activeFilter == "done") { <span>✅</span> }
+                        else if (activeFilter == "active") { <span>🎉</span> }
+                        else { <span>📋</span> }
+                    </div>
+                    <div class="empty-title">
+                        @if (!string.IsNullOrEmpty(searchQuery)) { <span>No results for "@searchQuery"</span> }
+                        else if (activeFilter == "done") { <span>No completed tasks yet</span> }
+                        else if (activeFilter == "active") { <span>All caught up!</span> }
+                        else { <span>Your list is empty</span> }
+                    </div>
+                    <div class="empty-sub">
+                        @if (string.IsNullOrEmpty(searchQuery) && activeFilter != "done")
+                        { <span>Add a task above to get started</span> }
+                    </div>
+                </div>
+            }
+            else
+            {
+                @foreach (var todo in pagedResult.Items)
+                {
+                    <div class="todo-card @(todo.IsCompleted ? "todo-done" : "") @(editingId == todo.Id ? "todo-editing" : "") priority-@todo.Priority.ToString().ToLower()">
+                        <div class="todo-check-col">
+                            <label class="custom-checkbox">
+                                <input type="checkbox" checked="@todo.IsCompleted" @onchange="() => ToggleTodo(todo)" />
+                                <span class="checkmark"></span>
+                            </label>
+                        </div>
 
-                        @if (editingId == todo.Id)
-                        {
-                            <div class="edit-group">
-                                <input class="edit-input" @bind="editTitle"
-                                       @onkeydown="(e) => HandleEditKeyDown(e, todo)"
-                                       @onblur="() => SaveEdit(todo)" />
-                                <select class="select-sm" @bind="editPriority">
-                                    <option value="@Priority.Low">🟢 Low</option>
-                                    <option value="@Priority.Medium">🟡 Medium</option>
-                                    <option value="@Priority.High">🔴 High</option>
-                                </select>
-                                <input class="input-sm" @bind="editCategory" placeholder="Category" />
-                            </div>
-                        }
-                        else
-                        {
-                            <div class="todo-content" @ondblclick="() => StartEdit(todo)">
-                                <span class="todo-title">@todo.Title</span>
+                        <div class="todo-body">
+                            @if (editingId == todo.Id)
+                            {
+                                <div class="edit-row">
+                                    <input class="edit-title-input" @bind="editTitle"
+                                           @onkeydown="(e) => HandleEditKeyDown(e, todo)"
+                                           @onblur="() => SaveEdit(todo)"
+                                           placeholder="Task title…" />
+                                </div>
+                                <div class="edit-meta-row">
+                                    <select class="meta-select" @bind="editPriority">
+                                        <option value="@Priority.Low">Low</option>
+                                        <option value="@Priority.Medium">Medium</option>
+                                        <option value="@Priority.High">High</option>
+                                    </select>
+                                    <input class="meta-input" @bind="editCategory" placeholder="Category" />
+                                    <button class="btn-save" @onclick="() => SaveEdit(todo)">Save</button>
+                                    <button class="btn-cancel" @onclick="() => editingId = null">Cancel</button>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="todo-title-row" @ondblclick="() => StartEdit(todo)">
+                                    <span class="todo-title">@todo.Title</span>
+                                </div>
                                 @if (!string.IsNullOrEmpty(todo.Notes))
                                 {
-                                    <span class="todo-notes">@todo.Notes</span>
+                                    <div class="todo-notes">@todo.Notes</div>
                                 }
-                                <div class="todo-meta">
+                                <div class="todo-chips">
+                                    <span class="chip chip-priority chip-@todo.Priority.ToString().ToLower()">
+                                        @(todo.Priority == Priority.High ? "🔴" : todo.Priority == Priority.Medium ? "🟡" : "🟢") @todo.Priority
+                                    </span>
                                     @if (!string.IsNullOrEmpty(todo.Category))
                                     {
-                                        <span class="badge badge-cat">@todo.Category</span>
+                                        <span class="chip chip-cat">@todo.Category</span>
                                     }
                                     @if (todo.DueDate.HasValue)
                                     {
                                         var overdue = !todo.IsCompleted && todo.DueDate < DateTime.UtcNow;
-                                        <span class="badge @(overdue ? "badge-overdue" : "badge-due")">
+                                        <span class="chip @(overdue ? "chip-overdue" : "chip-due")">
                                             📅 @todo.DueDate.Value.ToLocalTime().ToString("MMM d")
                                         </span>
                                     }
-                                    <span class="todo-date">@todo.CreatedAt.ToLocalTime().ToString("MMM d")</span>
+                                    <span class="chip chip-date">@todo.CreatedAt.ToLocalTime().ToString("MMM d")</span>
                                 </div>
-                            </div>
-                        }
+                            }
+                        </div>
+
+                        <div class="todo-actions">
+                            <button class="action-btn" @onclick="() => StartEdit(todo)" title="Edit (double-click title)">✏️</button>
+                            <button class="action-btn action-btn-danger" @onclick="() => DeleteTodo(todo)" title="Move to trash">🗑️</button>
+                        </div>
                     </div>
-                    <div class="todo-right">
-                        <span class="priority-badge priority-@todo.Priority.ToString().ToLower()">@todo.Priority</span>
-                        <button class="btn-icon" @onclick="() => StartEdit(todo)" title="Edit">✏️</button>
-                        <button class="btn-icon btn-delete" @onclick="() => DeleteTodo(todo)" title="Delete">🗑️</button>
-                    </div>
-                </div>
+                }
             }
+        </div>
+
+        <!-- Pagination -->
+        @if (pagedResult.TotalPages > 1)
+        {
+            <div class="pagination">
+                <button class="page-btn" @onclick="PrevPage" disabled="@(!pagedResult.HasPreviousPage)">← Prev</button>
+                <span class="page-info">@pagedResult.Page / @pagedResult.TotalPages</span>
+                <button class="page-btn" @onclick="NextPage" disabled="@(!pagedResult.HasNextPage)">Next →</button>
+            </div>
         }
-    </div>
+        else if (pagedResult.TotalCount > 0)
+        {
+            <div class="list-footer">
+                <span class="count-label">@pagedResult.TotalCount task@(pagedResult.TotalCount == 1 ? "" : "s")</span>
+                @if (pagedResult.Items.Any(t => t.IsCompleted))
+                {
+                    <button class="btn-clear" @onclick="ClearCompleted">
+                        Clear completed (@pagedResult.Items.Count(t => t.IsCompleted))
+                    </button>
+                }
+            </div>
+        }
 
-    <!-- Pagination -->
-    @if (pagedResult.TotalPages > 1)
-    {
-        <div class="pagination">
-            <button class="btn-page" @onclick="PrevPage" disabled="@(!pagedResult.HasPreviousPage)">← Prev</button>
-            <span class="page-info">Page @pagedResult.Page of @pagedResult.TotalPages (@pagedResult.TotalCount total)</span>
-            <button class="btn-page" @onclick="NextPage" disabled="@(!pagedResult.HasNextPage)">Next →</button>
-        </div>
-    }
-    else if (pagedResult.TotalCount > 0)
-    {
-        <div class="pagination-info">@pagedResult.TotalCount item@(pagedResult.TotalCount == 1 ? "" : "s")</div>
-    }
-
-    @if (pagedResult.Items.Any(t => t.IsCompleted))
-    {
-        <div class="footer-bar">
-            <button class="btn-clear" @onclick="ClearCompleted">
-                Clear completed (@pagedResult.Items.Count(t => t.IsCompleted))
-            </button>
-        </div>
-    }
+    </main>
 </div>
 
 @code {
@@ -246,23 +295,23 @@
     private TodoStats? stats;
     private List<string> categories = [];
 
-    private string newTitle    = "";
+    private string newTitle      = "";
     private Priority newPriority = Priority.Medium;
-    private string newCategory = "";
+    private string newCategory   = "";
     private DateTime? newDueDate;
 
     private int? editingId;
-    private string editTitle    = "";
+    private string editTitle      = "";
     private Priority editPriority = Priority.Medium;
-    private string editCategory = "";
+    private string editCategory   = "";
 
-    private string activeFilter  = "all";
+    private string activeFilter   = "all";
     private string categoryFilter = "";
-    private string searchQuery   = "";
-    private string sortBy        = "";
-    private bool   sortDesc      = false;
-    private int    currentPage   = 1;
-    private const int PageSize   = 20;
+    private string searchQuery    = "";
+    private string sortBy         = "";
+    private bool   sortDesc       = false;
+    private int    currentPage    = 1;
+    private const int PageSize    = 20;
     private bool overdrueBannerDismissed = false;
 
     private bool isLoading;
@@ -344,10 +393,10 @@
     private async Task ViewOverdue()
     {
         activeFilter = "active";
-        sortBy = "dueDate";
-        sortDesc = false;
+        sortBy       = "dueDate";
+        sortDesc     = false;
         overdrueBannerDismissed = true;
-        currentPage = 1;
+        currentPage  = 1;
         await LoadTodos();
     }
 
@@ -355,6 +404,13 @@
     {
         activeFilter = f;
         currentPage  = 1;
+        await LoadTodos();
+    }
+
+    private async Task SetCategory(string cat)
+    {
+        categoryFilter = cat;
+        currentPage    = 1;
         await LoadTodos();
     }
 
@@ -388,20 +444,12 @@
 
     private async Task PrevPage()
     {
-        if (pagedResult.HasPreviousPage)
-        {
-            currentPage--;
-            await LoadTodos();
-        }
+        if (pagedResult.HasPreviousPage) { currentPage--; await LoadTodos(); }
     }
 
     private async Task NextPage()
     {
-        if (pagedResult.HasNextPage)
-        {
-            currentPage++;
-            await LoadTodos();
-        }
+        if (pagedResult.HasNextPage) { currentPage++; await LoadTodos(); }
     }
 
     private async Task AddTodo()
@@ -456,7 +504,10 @@
     }
 
     private async Task HandleEditKeyDown(KeyboardEventArgs e, TodoItem t)
-    { if (e.Key == "Enter") await SaveEdit(t); if (e.Key == "Escape") editingId = null; }
+    {
+        if (e.Key == "Enter") await SaveEdit(t);
+        if (e.Key == "Escape") editingId = null;
+    }
 
     private async Task ToggleTodo(TodoItem t)
     {
