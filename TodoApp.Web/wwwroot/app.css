@@ -319,6 +319,9 @@ html, body {
     padding: 24px 16px;
     background: linear-gradient(135deg, #f4f5ff 0%, #e8ecff 100%);
 }
+[data-theme="dark"] .auth-page {
+    background: linear-gradient(135deg, var(--bg) 0%, #12122a 100%);
+}
 
 .auth-card {
     background: #fff;

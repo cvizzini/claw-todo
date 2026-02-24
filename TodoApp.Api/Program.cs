@@ -168,8 +168,8 @@ try
 
             if (!string.IsNullOrEmpty(otelEndpoint))
                 metrics.AddOtlpExporter(opts => opts.Endpoint = new Uri(otelEndpoint));
-            else if (builder.Environment.IsDevelopment())
-                metrics.AddConsoleExporter();
+            //else if (builder.Environment.IsDevelopment())
+            //    metrics.AddConsoleExporter();
         });
 
     builder.Services.ConfigureHttpJsonOptions(options =>

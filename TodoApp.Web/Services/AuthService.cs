@@ -28,9 +28,6 @@ public class AuthService
     public bool IsAdmin         => IsAuthenticated && CurrentUser!.Role is "Administrator";
     public bool IsTenantAdmin   => IsAuthenticated && CurrentUser!.Role is "TenantAdmin" or "Administrator";
 
-    // Guards against calling TryRestoreSessionAsync multiple times in one circuit
-    private bool _sessionRestored = false;
-
     public event Action? AuthStateChanged;
 
     // ── Login ─────────────────────────────────────────────────────────────────
@@ -103,9 +100,6 @@ public class AuthService
 
     public async Task TryRestoreSessionAsync()
     {
-        if (_sessionRestored) return;
-        _sessionRestored = true;
-
         try
         {
             var stored = await _js.InvokeAsync<StoredSession?>("sessionStore.load");
@@ -186,7 +180,6 @@ public class AuthService
     private async Task ClearAuthAsync()
     {
         CurrentUser = null;
-        _sessionRestored = false;
         _http.DefaultRequestHeaders.Authorization = null;
 
         try { await _js.InvokeVoidAsync("sessionStore.clear"); }
