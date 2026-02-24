@@ -7,11 +7,3 @@
         <FocusOnNavigate RouteData="routeData" Selector="h1" />
     </Found>
 </Router>
-
-@code {
-    protected override async Task OnAfterRenderAsync(bool firstRender)
-    {
-        if (firstRender && !Auth.IsAuthenticated)
-            await Auth.TryRestoreSessionAsync();
-    }
-}

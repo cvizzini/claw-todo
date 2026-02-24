@@ -5,12 +5,18 @@
 @inject AuthService Auth
 @inject TodoApiService TodoService
 @inject NavigationManager Nav
+@implements IDisposable
 
-<PageTitle>Trash — TodoApp</PageTitle>
+<PageTitle>Trash – TodoApp</PageTitle>
+
+@if (isCheckingAuth)
+{
+    <div class="loading-state"><div class="spinner"></div> Loading…</div>
+    return;
+}
 
 @if (!Auth.IsAuthenticated)
 {
-    Nav.NavigateTo("/login");
     return;
 }
 
@@ -79,13 +85,35 @@
     private List<TodoItem> items = [];
     private bool isLoading = true;
     private bool isBusy = false;
+    private bool isCheckingAuth = true;
     private string? message;
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        if (!Auth.IsAuthenticated) return;
-        await LoadTrash();
+        Auth.AuthStateChanged += OnAuthChanged;
     }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        if (!Auth.IsAuthenticated)
+            await Auth.TryRestoreSessionAsync();
+
+        isCheckingAuth = false;
+
+        if (Auth.IsAuthenticated)
+            await LoadTrash();
+        else
+        {
+            Nav.NavigateTo("/login");
+            StateHasChanged();
+        }
+    }
+
+    private void OnAuthChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Auth.AuthStateChanged -= OnAuthChanged;
 
     private async Task LoadTrash()
     {

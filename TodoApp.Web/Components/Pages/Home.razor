@@ -5,8 +5,15 @@
 @inject AuthService Auth
 @inject TodoApiService TodoService
 @inject NavigationManager Nav
+@implements IDisposable
 
 <PageTitle>My Todos</PageTitle>
+
+@if (isCheckingAuth)
+{
+    <div class="loading-state"><div class="spinner"></div> Loading…</div>
+    return;
+}
 
 @if (!Auth.IsAuthenticated)
 {
@@ -260,18 +267,40 @@
 
     private bool isLoading;
     private bool isSaving;
+    private bool isCheckingAuth = true;
     private string? errorMessage;
 
     private System.Timers.Timer? _searchDebounce;
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
+        Auth.AuthStateChanged += OnAuthChanged;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
         if (!Auth.IsAuthenticated)
+            await Auth.TryRestoreSessionAsync();
+
+        isCheckingAuth = false;
+
+        if (Auth.IsAuthenticated)
+            await Task.WhenAll(LoadTodos(), LoadCategories(), LoadStats());
+        else
         {
             Nav.NavigateTo("/login");
-            return;
+            StateHasChanged();
         }
-        await Task.WhenAll(LoadTodos(), LoadCategories(), LoadStats());
+    }
+
+    private void OnAuthChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Auth.AuthStateChanged -= OnAuthChanged;
+        _searchDebounce?.Dispose();
     }
 
     private async Task LoadTodos()

@@ -6,8 +6,15 @@
 @inject AuthService Auth
 @inject NavigationManager Nav
 @inject IHttpClientFactory HttpFactory
+@implements IDisposable
 
-<PageTitle>Admin — TodoApp</PageTitle>
+<PageTitle>Admin – TodoApp</PageTitle>
+
+@if (isCheckingAuth)
+{
+    <div class="loading-state"><div class="spinner"></div> Loading…</div>
+    return;
+}
 
 @if (!Auth.IsAdmin)
 {
@@ -202,7 +209,7 @@
                         <div class="form-group">
                             <label>Tenant</label>
                             <select class="form-input" @bind="newUserTenantId">
-                                <option value="">— select tenant —</option>
+                                <option value="">- select tenant -</option>
                                 @foreach (var t in tenants.Where(t => t.IsActive))
                                 {
                                     <option value="@t.Id">@t.Name</option>
@@ -262,7 +269,7 @@
                                     }
                                     else
                                     {
-                                        <span class="muted">—</span>
+                                        <span class="muted">-</span>
                                     }
                                 </td>
                                 <td>
@@ -309,6 +316,9 @@
     private string? message;
     private bool isError;
 
+    // True while we're waiting for the client-side session restore to complete
+    private bool isCheckingAuth = true;
+
     private List<TenantSummary> tenants = [];
     private List<UserSummary> users = [];
 
@@ -322,14 +332,38 @@
     private int? tenantFilter;
     private string? tenantFilterName;
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        if (!Auth.IsAdmin) return;
-        Http = HttpFactory.CreateClient("TodoApi");
-        Http.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Auth.CurrentUser!.Token);
-        await LoadTenantsAsync();
+        // Subscribe so we re-render when auth state is restored from localStorage
+        Auth.AuthStateChanged += OnAuthChanged;
     }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        // Session restore runs client-side (JS is available here)
+        if (!Auth.IsAuthenticated)
+            await Auth.TryRestoreSessionAsync();
+
+        isCheckingAuth = false;
+
+        if (Auth.IsAdmin)
+        {
+            Http = HttpFactory.CreateClient("TodoApi");
+            Http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Auth.CurrentUser!.Token);
+            await LoadTenantsAsync();
+        }
+        else
+        {
+            StateHasChanged();
+        }
+    }
+
+    private void OnAuthChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Auth.AuthStateChanged -= OnAuthChanged;
 
     private async Task SwitchTab(string newTab)
     {
@@ -399,7 +433,7 @@
     {
         var resp = await Http.DeleteAsync($"/api/v1/admin/tenants/{id}");
         if (resp.IsSuccessStatusCode) { ShowSuccess("Tenant deleted."); await LoadTenantsAsync(); }
-        else ShowError("Cannot delete tenant — it may still have users.");
+        else ShowError("Cannot delete tenant - it may still have users.");
     }
 
     // ── Users ─────────────────────────────────────────────────────────────────
@@ -413,19 +447,22 @@
         finally { isLoading = false; }
     }
 
-    private void FilterUsersByTenant(int id, string name)
+    private async Task FilterUsersByTenant(int id, string name)
     {
         tenantFilter = id;
         tenantFilterName = name;
         tab = "users";
-        _ = LoadUsersAsync();
+        showTenantForm = false;
+        showUserForm = false;
+        message = null;
+        await LoadUsersAsync();
     }
 
-    private void ClearTenantFilter()
+    private async Task ClearTenantFilter()
     {
         tenantFilter = null;
         tenantFilterName = null;
-        _ = LoadUsersAsync();
+        await LoadUsersAsync();
     }
 
     private async Task CreateUserAsync()
