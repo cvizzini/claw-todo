@@ -1,11 +1,15 @@
 using System.Net;
 using System.Text.Json;
+using TodoApp.Domain.Exceptions;
 
 namespace TodoApp.Api.Middleware;
 
 public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExceptionMiddleware> logger)
 {
-    private static readonly JsonSerializerOptions _jsonOpts = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private static readonly JsonSerializerOptions _jsonOpts = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
 
     public async Task InvokeAsync(HttpContext context)
     {
@@ -15,7 +19,8 @@ public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExcep
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Unhandled exception for {Method} {Path}", context.Request.Method, context.Request.Path);
+            logger.LogError(ex, "Unhandled exception for {Method} {Path}",
+                context.Request.Method, context.Request.Path);
             await WriteErrorResponse(context, ex);
         }
     }
@@ -24,22 +29,25 @@ public class GlobalExceptionMiddleware(RequestDelegate next, ILogger<GlobalExcep
     {
         context.Response.ContentType = "application/json";
 
-        var (statusCode, message) = ex switch
+        var (statusCode, message, errors) = ex switch
         {
-            ArgumentException      => (HttpStatusCode.BadRequest, ex.Message),
-            UnauthorizedAccessException => (HttpStatusCode.Forbidden, "Access denied."),
-            KeyNotFoundException   => (HttpStatusCode.NotFound, "Resource not found."),
-            OperationCanceledException => (HttpStatusCode.ServiceUnavailable, "Request cancelled."),
-            _                      => (HttpStatusCode.InternalServerError, "An unexpected error occurred.")
+            NotFoundException           => (HttpStatusCode.NotFound,             ex.Message, (IEnumerable<string>?)null),
+            ValidationException ve      => (HttpStatusCode.BadRequest,           ex.Message, ve.Errors),
+            ConflictException           => (HttpStatusCode.Conflict,             ex.Message, null),
+            ForbiddenException          => (HttpStatusCode.Forbidden,            ex.Message, null),
+            AccountLockedException      => ((HttpStatusCode)423,                 ex.Message, null),
+            TenantInactiveException     => (HttpStatusCode.Forbidden,            ex.Message, null),
+            UnauthorizedAccessException => (HttpStatusCode.Unauthorized,         ex.Message, null),
+            ArgumentException           => (HttpStatusCode.BadRequest,           ex.Message, null),
+            OperationCanceledException  => (HttpStatusCode.ServiceUnavailable,  "Request cancelled.", null),
+            _                           => (HttpStatusCode.InternalServerError,  "An unexpected error occurred.", null)
         };
 
         context.Response.StatusCode = (int)statusCode;
 
-        var payload = new
-        {
-            error = message,
-            traceId = context.TraceIdentifier
-        };
+        object payload = errors is not null
+            ? new { error = message, errors, traceId = context.TraceIdentifier }
+            : new { error = message, traceId = context.TraceIdentifier };
 
         await context.Response.WriteAsync(JsonSerializer.Serialize(payload, _jsonOpts));
     }

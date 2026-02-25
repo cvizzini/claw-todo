@@ -4,7 +4,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Configuration;
-using TodoApp.Api.Data;
+using TodoApp.Infrastructure.Data;
 
 namespace TodoApp.Api.Tests;
 

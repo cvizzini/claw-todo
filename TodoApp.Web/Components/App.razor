@@ -20,16 +20,15 @@
     <meta name="apple-mobile-web-app-title" content="TodoApp" />
     <link rel="apple-touch-icon" href="icons/icon-192.png" />
 
-    <HeadOutlet @rendermode="InteractiveServer" />
+    <HeadOutlet @rendermode="@(new InteractiveServerRenderMode(prerender: false))" />
 
-    <!-- Theme: init before render to prevent flash -->
     <script src="theme.js"></script>
     <!-- Session persistence -->
     <script src="session.js"></script>
 </head>
 
 <body>
-    <Routes @rendermode="InteractiveServer" />
+    <Routes @rendermode="@(new InteractiveServerRenderMode(prerender: false))" />
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <script>

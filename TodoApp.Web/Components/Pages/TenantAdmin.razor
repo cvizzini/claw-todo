@@ -6,8 +6,15 @@
 @inject AuthService Auth
 @inject NavigationManager Nav
 @inject IHttpClientFactory HttpFactory
+@implements IDisposable
 
-<PageTitle>Tenant Admin — TodoApp</PageTitle>
+<PageTitle>Tenant Admin – TodoApp</PageTitle>
+
+@if (isCheckingAuth)
+{
+    <div class="loading-state"><div class="spinner"></div> Loading…</div>
+    return;
+}
 
 @if (!Auth.IsTenantAdmin)
 {
@@ -153,24 +160,67 @@
     private bool showUserForm;
     private string? message;
     private bool isError;
+    private bool isCheckingAuth = true;
     private List<UserSummary> users = [];
     private CreateUserRequest newUser = new();
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        if (!Auth.IsTenantAdmin) return;
-        Http = HttpFactory.CreateClient("TodoApi");
-        Http.DefaultRequestHeaders.Authorization =
-            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Auth.CurrentUser!.Token);
-        await LoadUsersAsync();
+        Auth.AuthStateChanged += OnAuthChanged;
     }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        try
+        {
+            if (!Auth.IsAuthenticated)
+                await Auth.TryRestoreSessionAsync();
+        }
+        catch (Exception ex)
+        {
+            ShowError($"Session restore failed: {ex.Message}");
+        }
+        finally
+        {
+            isCheckingAuth = false;
+            StateHasChanged();
+        }
+
+        if (Auth.IsTenantAdmin)
+        {
+            Http = HttpFactory.CreateClient("TodoApi");
+            Http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", Auth.CurrentUser!.Token);
+
+            try
+            {
+                await LoadUsersAsync();
+            }
+            catch (Exception ex)
+            {
+                ShowError($"Failed to load data: {ex.Message}");
+                StateHasChanged();
+            }
+        }
+    }
+
+    private void OnAuthChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Auth.AuthStateChanged -= OnAuthChanged;
 
     private async Task LoadUsersAsync()
     {
         isLoading = true;
+        StateHasChanged();
         try { users = await Http.GetFromJsonAsync<List<UserSummary>>("/api/v1/tenant/users") ?? []; }
         catch { ShowError("Failed to load users."); }
-        finally { isLoading = false; }
+        finally 
+        { 
+            isLoading = false;
+            StateHasChanged();
+        }
     }
 
     private async Task CreateUserAsync()

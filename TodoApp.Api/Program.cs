@@ -1,14 +1,11 @@
 using System.Diagnostics;
-using System.Text;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.OpenApi;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
-using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -16,9 +13,12 @@ using OpenTelemetry.Trace;
 using Scalar.AspNetCore;
 using Serilog;
 using Serilog.Events;
-using TodoApp.Api.Data;
 using TodoApp.Api.Endpoints;
 using TodoApp.Api.Middleware;
+using TodoApp.Application;
+using TodoApp.Infrastructure;
+using TodoApp.Infrastructure.Data;
+using TodoApp.Infrastructure.Seeding;
 
 // ── Serilog bootstrap ─────────────────────────────────────────────────────────
 Log.Logger = new LoggerConfiguration()
@@ -52,51 +52,17 @@ try
             retainedFileCountLimit: 14,
             outputTemplate: "[{Timestamp:yyyy-MM-dd HH:mm:ss} {Level:u3}] {SourceContext} {Message:lj}{NewLine}{Exception}"));
 
-    // ── Database ──────────────────────────────────────────────────────────────
-    builder.Services.AddDbContext<TodoDbContext>(options =>
-        options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")
-            ?? "Data Source=todos.db"));
+    // ── Infrastructure (DB, Identity, JWT, Repositories, Services) ────────────
+    builder.Services.AddInfrastructure(builder.Configuration);
 
-    // ── Identity ──────────────────────────────────────────────────────────────
-    builder.Services.AddIdentity<AppUser, IdentityRole>(options =>
-    {
-        options.Password.RequireDigit = true;
-        options.Password.RequiredLength = 6;
-        options.Password.RequireUppercase = false;
-        options.Password.RequireNonAlphanumeric = false;
-        options.User.RequireUniqueEmail = true;
-    })
-    .AddEntityFrameworkStores<TodoDbContext>()
-    .AddDefaultTokenProviders();
+    // ── Application (Todo/Auth/Tenant services) ───────────────────────────────
+    builder.Services.AddApplication();
 
-    // ── JWT Authentication ────────────────────────────────────────────────────
-    var jwtSection = builder.Configuration.GetSection("Jwt");
-    var jwtKey = jwtSection["Key"]!;
-
-    builder.Services.AddAuthentication(options =>
-    {
-        options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
-        options.DefaultChallengeScheme    = JwtBearerDefaults.AuthenticationScheme;
-    })
-    .AddJwtBearer(options =>
-    {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuer           = true,
-            ValidateAudience         = true,
-            ValidateLifetime         = true,
-            ValidateIssuerSigningKey = true,
-            ValidIssuer              = jwtSection["Issuer"],
-            ValidAudience            = jwtSection["Audience"],
-            IssuerSigningKey         = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtKey)),
-            ClockSkew                = TimeSpan.FromSeconds(30)
-        };
-    });
-
+    // ── Authorization policies ────────────────────────────────────────────────
     builder.Services.AddAuthorization(options =>
     {
-        options.AddPolicy("AdminOnly",           policy => policy.RequireRole("Administrator"));
-        options.AddPolicy("TenantAdminOrAbove",  policy => policy.RequireRole("Administrator", "TenantAdmin"));
+        options.AddPolicy("AdminOnly",          policy => policy.RequireRole("Administrator"));
+        options.AddPolicy("TenantAdminOrAbove", policy => policy.RequireRole("Administrator", "TenantAdmin"));
     });
 
     // ── Rate Limiting ─────────────────────────────────────────────────────────
@@ -107,7 +73,6 @@ try
         var authLimit = builder.Configuration.GetValue<int>("RateLimiting:AuthLimit", 10);
         var apiLimit  = builder.Configuration.GetValue<int>("RateLimiting:ApiLimit", 100);
 
-        // Auth endpoints: configurable per minute per IP (default 10)
         options.AddPolicy("auth", context =>
             RateLimitPartition.GetFixedWindowLimiter(
                 partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -119,7 +84,6 @@ try
                     AutoReplenishment = true
                 }));
 
-        // General API: configurable per minute per IP (default 100)
         options.AddPolicy("api", context =>
             RateLimitPartition.GetFixedWindowLimiter(
                 partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -133,7 +97,7 @@ try
 
         options.OnRejected = async (ctx, token) =>
         {
-            ctx.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+            ctx.HttpContext.Response.StatusCode  = StatusCodes.Status429TooManyRequests;
             ctx.HttpContext.Response.ContentType = "application/json";
             await ctx.HttpContext.Response.WriteAsync(
                 "{\"error\":\"Too many requests. Please slow down.\",\"retryAfter\":60}", token);
@@ -166,7 +130,7 @@ try
             tags:          ["db", "ready"]);
 
     // ── OpenTelemetry ─────────────────────────────────────────────────────────
-    var otelEndpoint = builder.Configuration["OpenTelemetry:Endpoint"]; // e.g. http://localhost:4317
+    var otelEndpoint = builder.Configuration["OpenTelemetry:Endpoint"];
     var serviceName  = builder.Configuration["OpenTelemetry:ServiceName"] ?? "TodoApp.Api";
 
     builder.Services.AddOpenTelemetry()
@@ -182,14 +146,12 @@ try
             tracing
                 .AddAspNetCoreInstrumentation(opts =>
                 {
-                    // Skip health check endpoints — they would just be noise
                     opts.Filter = ctx =>
                         !ctx.Request.Path.StartsWithSegments("/health") &&
                         !ctx.Request.Path.StartsWithSegments("/health/ready");
                 })
                 .AddEntityFrameworkCoreInstrumentation(opts =>
                 {
-                    // Include full SQL text in spans — disable in prod if queries contain PII
                     opts.SetDbStatementForText = true;
                 });
 
@@ -201,13 +163,13 @@ try
         .WithMetrics(metrics =>
         {
             metrics
-                .AddAspNetCoreInstrumentation()  // http.server.request.duration, active requests, etc.
-                .AddRuntimeInstrumentation();    // GC collections, heap size, thread pool queue
+                .AddAspNetCoreInstrumentation()
+                .AddRuntimeInstrumentation();
 
             if (!string.IsNullOrEmpty(otelEndpoint))
                 metrics.AddOtlpExporter(opts => opts.Endpoint = new Uri(otelEndpoint));
-            else if (builder.Environment.IsDevelopment())
-                metrics.AddConsoleExporter();
+            //else if (builder.Environment.IsDevelopment())
+            //    metrics.AddConsoleExporter();
         });
 
     builder.Services.ConfigureHttpJsonOptions(options =>
@@ -232,44 +194,10 @@ try
             db.Database.EnsureCreated();
     }
 
-    // ── Seed roles ────────────────────────────────────────────────────────────
+    // ── Seed roles + super-admin ──────────────────────────────────────────────
     using (var scope = app.Services.CreateScope())
     {
-        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-        foreach (var role in new[] { "User", "TenantAdmin", "Administrator" })
-        {
-            if (!await roleManager.RoleExistsAsync(role))
-                await roleManager.CreateAsync(new IdentityRole(role));
-        }
-    }
-
-    // ── Seed super-admin ──────────────────────────────────────────────────────
-    using (var scope = app.Services.CreateScope())
-    {
-        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
-        var seedSection = app.Configuration.GetSection("Seed");
-        var adminEmail  = seedSection["AdminEmail"];
-        var adminPass   = seedSection["AdminPassword"];
-        var adminName   = seedSection["AdminDisplayName"] ?? "Super Admin";
-
-        if (!string.IsNullOrEmpty(adminEmail) && !string.IsNullOrEmpty(adminPass))
-        {
-            var existing = await userManager.FindByEmailAsync(adminEmail);
-            if (existing is null)
-            {
-                var superAdmin = new AppUser
-                {
-                    UserName    = adminEmail,
-                    Email       = adminEmail,
-                    DisplayName = adminName,
-                    TenantId    = null,
-                    CreatedAt   = DateTime.UtcNow
-                };
-                var result = await userManager.CreateAsync(superAdmin, adminPass);
-                if (result.Succeeded)
-                    await userManager.AddToRoleAsync(superAdmin, "Administrator");
-            }
-        }
+        await DatabaseSeeder.SeedAsync(scope.ServiceProvider, app.Configuration);
     }
 
     // ── Middleware pipeline ───────────────────────────────────────────────────
@@ -283,14 +211,12 @@ try
                 ? LogEventLevel.Warning
                 : LogEventLevel.Information;
 
-        // Enrich each request log with tenant + trace context
         opts.EnrichDiagnosticContext = (diagCtx, httpCtx) =>
         {
-            diagCtx.Set("RequestHost",   httpCtx.Request.Host.Value);
-            diagCtx.Set("UserAgent",     httpCtx.Request.Headers.UserAgent.ToString());
-            diagCtx.Set("UserId",        httpCtx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "-");
-            diagCtx.Set("TenantId",      httpCtx.User.FindFirst("tenant_id")?.Value ?? "-");
-            // Include OTel trace/span IDs so logs can be correlated to traces
+            diagCtx.Set("RequestHost", httpCtx.Request.Host.Value);
+            diagCtx.Set("UserAgent",   httpCtx.Request.Headers.UserAgent.ToString());
+            diagCtx.Set("UserId",      httpCtx.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "-");
+            diagCtx.Set("TenantId",    httpCtx.User.FindFirst("tenant_id")?.Value ?? "-");
             var activity = Activity.Current;
             if (activity is not null)
             {
@@ -328,13 +254,9 @@ try
     app.MapTenantAdminEndpoints();
 
     // ── Health endpoints ──────────────────────────────────────────────────────
-    // GET /health/live  — liveness: is the process alive? (no DB check, used by container orchestrators)
     app.MapGet("/health/live", () => Results.Ok(new { Status = "alive", Time = DateTime.UtcNow }))
-       .WithTags("Health")
-       .AllowAnonymous()
-       .ExcludeFromDescription();
+       .WithTags("Health").AllowAnonymous().ExcludeFromDescription();
 
-    // GET /health/ready — readiness: is the app ready to serve (DB reachable)?
     app.MapHealthChecks("/health/ready", new HealthCheckOptions
     {
         Predicate      = check => check.Tags.Contains("ready"),
@@ -354,11 +276,8 @@ try
             };
             await ctx.Response.WriteAsJsonAsync(result);
         }
-    })
-    .AllowAnonymous()
-    .WithTags("Health");
+    }).AllowAnonymous().WithTags("Health");
 
-    // GET /health — backwards-compatible alias that includes both live + ready info
     app.MapHealthChecks("/health", new HealthCheckOptions
     {
         ResponseWriter = async (ctx, report) =>
@@ -378,9 +297,7 @@ try
             };
             await ctx.Response.WriteAsJsonAsync(result);
         }
-    })
-    .AllowAnonymous()
-    .WithTags("Health");
+    }).AllowAnonymous().WithTags("Health");
 
     Log.Information("TodoApp API starting up");
     app.Run();

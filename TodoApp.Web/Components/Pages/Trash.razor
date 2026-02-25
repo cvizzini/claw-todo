@@ -5,12 +5,18 @@
 @inject AuthService Auth
 @inject TodoApiService TodoService
 @inject NavigationManager Nav
+@implements IDisposable
 
-<PageTitle>Trash — TodoApp</PageTitle>
+<PageTitle>Trash – TodoApp</PageTitle>
+
+@if (isCheckingAuth)
+{
+    <div class="loading-state"><div class="spinner"></div> Loading…</div>
+    return;
+}
 
 @if (!Auth.IsAuthenticated)
 {
-    Nav.NavigateTo("/login");
     return;
 }
 
@@ -79,20 +85,66 @@
     private List<TodoItem> items = [];
     private bool isLoading = true;
     private bool isBusy = false;
+    private bool isCheckingAuth = true;
     private string? message;
 
-    protected override async Task OnInitializedAsync()
+    protected override void OnInitialized()
     {
-        if (!Auth.IsAuthenticated) return;
-        await LoadTrash();
+        Auth.AuthStateChanged += OnAuthChanged;
     }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        try
+        {
+            if (!Auth.IsAuthenticated)
+                await Auth.TryRestoreSessionAsync();
+        }
+        catch (Exception ex)
+        {
+            message = $"Session restore failed: {ex.Message}";
+        }
+        finally
+        {
+            isCheckingAuth = false;
+            StateHasChanged();
+        }
+
+        if (Auth.IsAuthenticated)
+        {
+            try
+            {
+                await LoadTrash();
+            }
+            catch (Exception ex)
+            {
+                message = $"Failed to load data: {ex.Message}";
+                StateHasChanged();
+            }
+        }
+        else
+        {
+            Nav.NavigateTo("/login");
+        }
+    }
+
+    private void OnAuthChanged() => InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Auth.AuthStateChanged -= OnAuthChanged;
 
     private async Task LoadTrash()
     {
         isLoading = true;
+        StateHasChanged();
         try { items = await TodoService.GetTrashAsync(); }
         catch (Exception ex) { message = $"Failed to load trash: {ex.Message}"; }
-        finally { isLoading = false; }
+        finally 
+        { 
+            isLoading = false;
+            StateHasChanged();
+        }
     }
 
     private async Task Restore(TodoItem item)
